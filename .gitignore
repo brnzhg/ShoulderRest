@@ -1,0 +1,20 @@
+# Python and local environments
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.uv-cache/
+.pytest_cache/
+.ruff_cache/
+build/
+dist/
+
+# Generated CAD exports (reference assets remain tracked)
+exports/*
+!exports/.gitkeep
+
+# Local editor and OS files
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

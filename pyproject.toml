@@ -1,0 +1,24 @@
+[project]
+name = "shoulder-rest"
+version = "0.1.0"
+description = "Parametric build123d models for a violin shoulder rest"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "build123d>=0.12.0",
+    "mypy>=2.3.1",
+]
+
+[build-system]
+requires = ["uv_build>=0.12.11,<0.13.0"]
+build-backend = "uv_build"
+
+[tool.uv.build-backend]
+module-name = "shoulder_rest"
+module-root = "src"
+# uv_build includes all files inside the package, including assets/.
+
+[dependency-groups]
+dev = [
+    "ocp-vscode>=4.1.0",
+]
