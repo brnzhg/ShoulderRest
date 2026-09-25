@@ -15,7 +15,19 @@ This is a sketch of a tracing of the violin, with a small offset. In the modelli
 ### Shoulder Model
 This is a part created by a different project that is loaded here. It is a model of the violin player's shoulder/collarbone area where the rest sits. This is used to cut out the contour of the Rest Body on the face contacting the player. 
 
-The reference and extended STEP casts are bundled as package resources. Adjust `POSITION` and `ROTATION` in `src/shoulder_rest/parts/shoulder.py` to position both together. With OCP CAD Viewer open, preview them using:
+`load_shoulder()` returns the `Shoulder` interface: `reference` and `extended` provide independent shapes for modeling, `assembly` contains the reference cast for display, and `violin_joint` is a rigid attachment named `violin`. The extended cast is a cutting tool and is excluded from the assembly.
+
+```python
+from shoulder_rest.parts.shoulder import Shoulder, load_shoulder
+
+shoulder: Shoulder = load_shoulder()
+cutting_tool = shoulder.extended
+# shoulder.violin_joint.connect_to(violin.joints["shoulder"])
+```
+
+The bundled STEP files and their loading are hidden by `load_shoulder()`. For other casts, use `StepShoulder(reference_file, extended_file, cast_location=..., violin_location=...)` with build123d `Location` objects. The cast location reorients both files together; the violin location is defined in the corrected shoulder frame, so the cast transform is not applied to it again.
+
+Adjust `POSITION` / `ROTATION` and `VIOLIN_POSITION` / `VIOLIN_ROTATION` in `src/shoulder_rest/parts/shoulder.py` for the bundled example. Position the completed shoulder with `shoulder.assembly.locate(...)`; retrieve tool shapes afterward to get their current world placement. Connect joints before nesting assemblies. With OCP CAD Viewer open, preview both casts and the joint using:
 
 ```powershell
 uv run python -m shoulder_rest.parts.shoulder
