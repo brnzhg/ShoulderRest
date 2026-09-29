@@ -6,17 +6,74 @@ the screw runs along Z. Lengths are in millimeters and angles in degrees.
 
 from copy import deepcopy
 from dataclasses import dataclass, fields
-from math import isclose, isfinite, radians, sqrt, tan
+from math import isfinite, radians, sqrt, tan
 from typing import Protocol, cast
 
 from build123d import (
     Align, Axis, Box, BuildPart, BuildSketch, Color, Compound, Cylinder,
-    Face, GeomType, Kind, Location, Locations, Mode, Part, Plane, Polygon,
-    Rectangle, RevoluteJoint, RigidJoint, ShapeList, Solid,
+    Face, Kind, Location, Locations, Mode, Part, Plane, Polygon,
+    Rectangle, RevoluteJoint, RigidJoint, Solid,
     chamfer, extrude, fillet, insert, offset,
 )
 
 from shoulder_rest.parts.kun import KunParameters, nut_slot_face, screw_hole_face
+
+@dataclass(frozen=True)
+class LegInstallation:
+    """Independent results of one installation; connect the leg after all cuts.
+
+    Use the *latest* rest's joints[joint_label] for final assembly. A subsequent
+    installation returns another rest, carrying forward all existing joints.
+    leg is the full assembly (printed body and metal rod).
+    tool and housing are fixed snapshots of the installed, zero-angle cavity.
+    """
+
+    rest: Part | Solid
+    leg: Compound
+    tool: Part
+    housing: Part
+    joint_label: str
+
+    @property
+    def rod_joint(self) -> RigidJoint:
+        """Connect the final rest's hinge joint to this installed leg."""
+        return cast(RigidJoint, self.leg.joints["rod"])
+
+
+class Leg(Protocol):
+    """Geometry and installation interface for a shoulder-rest implementation."""
+
+    @property
+    def part(self) -> Part:
+        """Printable child for export; position the whole assembly for modeling."""
+        ...
+
+    @property
+    def assembly(self) -> Compound:
+        """Printable leg and metal rod; position and connect this assembly."""
+        ...
+
+    @property
+    def tool(self) -> Part:
+        """Cavity tool snapshot at the template assembly's current placement."""
+        ...
+
+    @property
+    def housing(self) -> Part:
+        """Required surrounding material guide; never automatically added to a rest."""
+        ...
+
+    @property
+    def mount_joint(self) -> RigidJoint:
+        """Installation reference at the center of the nut-seat edge."""
+        ...
+
+    def install(
+        self, mount: RigidJoint, *, joint_label: str = "leg",
+        angular_range: tuple[float, float] = (-180, 180),
+    ) -> LegInstallation:
+        """Cut mount.parent and return the new rest, hinge, leg and guide snapshots."""
+        ...
 
 
 @dataclass(frozen=True)
@@ -42,7 +99,7 @@ class LegParameters:
     rear_relief_angle: float = 20.0
     edge_chamfer: float = 0.3
     rod_house_length: float = 6.2
-    rod_bore_clearance: float = 0.2  # Added to diameter, not radius.
+    rod_bore_clearance: float = 0.3  # Added to diameter, not radius.
     housing_gap: float = 1.0
     nose_radius: float = 1.5
 
@@ -132,10 +189,8 @@ def _body_profile(p: LegParameters) -> Face:
 
 
 class HingeLegPart(Part):
-    """One printable housing with named face tags and rigid attachment frames.
+    """One printable housing with rigid attachment frames.
 
-    tags returns current world-space face snapshots: rod_bore, nut_floor,
-    nut_roof, screw_passage, and side_faces.
     Joints: rod at the origin with its Z axis along +X; screw at the nominal
     screw entry on the bottom face with Z along +Z; nut at the nut seat center.
     Use these frames before nesting in an assembly.
@@ -171,50 +226,6 @@ class HingeLegPart(Part):
         RigidJoint("rod", self, Location(Plane(origin=(0, 0, 0), z_dir=(1, 0, 0))))
         RigidJoint("screw", self, Location((0, p.screw_y, -p.rod_half)))
         RigidJoint("nut", self, Location((0, p.screw_y, p.rod_half)))
-        self._local_tags = self._tag_faces()
-
-    def _tag_faces(self) -> dict[str, ShapeList[Face]]:
-        """Select semantic faces by geometry, never by unstable face indices."""
-        p = self.parameters
-        tags: dict[str, ShapeList[Face]] = {
-            name: ShapeList() for name in (
-                "rod_bore", "nut_floor", "nut_roof", "screw_passage", "side_faces"
-            )
-        }
-        for face in self.faces():
-            box = face.bounding_box()
-            center = face.center()
-            if face.geom_type == GeomType.CYLINDER and isclose(
-                box.size.Y, p.rod_hole_diameter, abs_tol=1e-6
-            ) and abs(center.Y) < 1e-6:
-                tags["rod_bore"].append(face)
-            if face.geom_type == GeomType.PLANE:
-                if box.size.X < 1e-6 and isclose(abs(center.X), p.width / 2, abs_tol=1e-6):
-                    tags["side_faces"].append(face)
-                if box.size.Z < 1e-6 and isclose(center.Y, p.screw_y, abs_tol=1e-6):
-                    if isclose(center.Z, p.rod_half, abs_tol=1e-6):
-                        tags["nut_floor"].append(face)
-                    elif isclose(center.Z, p.rod_half + p.kun.nut_slot_height, abs_tol=1e-6):
-                        tags["nut_roof"].append(face)
-            if (
-                box.size.Z > 1e-6
-                and box.min.Y > p.housing_start + p.wall
-                and box.max.Y < p.housing_start + p.wall + p.kun.nut_slot_width
-                and box.min.X > -p.width / 2 + p.edge_chamfer
-                and box.max.X < p.width / 2 - p.edge_chamfer
-            ):
-                tags["screw_passage"].append(face)
-        for name, faces in tags.items():
-            for face in faces:
-                face.label = name
-        return tags
-
-    @property
-    def tags(self) -> dict[str, ShapeList[Face]]:
-        return {
-            name: ShapeList(face.moved(self.global_location) for face in faces)
-            for name, faces in self._local_tags.items()
-        }
 
 
 @dataclass(frozen=True)
@@ -335,64 +346,6 @@ def _housing_guide(p: LegParameters, c: CavityParameters, tool: Part) -> Part:
         raise ValueError("Housing wall must leave a connected guide around the cavity")
     guide.part_local.label = "Leg housing guide"
     return guide.part_local
-
-
-@dataclass(frozen=True)
-class LegInstallation:
-    """Independent results of one installation; connect the leg after all cuts.
-
-    Use the *latest* rest's joints[joint_label] for final assembly. A subsequent
-    installation returns another rest, carrying forward all existing joints.
-    leg is the full assembly (printed body and metal rod).
-    tool and housing are fixed snapshots of the installed, zero-angle cavity.
-    """
-
-    rest: Part | Solid
-    leg: Compound
-    tool: Part
-    housing: Part
-    joint_label: str
-
-    @property
-    def rod_joint(self) -> RigidJoint:
-        """Connect the final rest's hinge joint to this installed leg."""
-        return cast(RigidJoint, self.leg.joints["rod"])
-
-
-class Leg(Protocol):
-    """Geometry and installation interface for a shoulder-rest implementation."""
-
-    @property
-    def part(self) -> Part:
-        """Printable child for export; position the whole assembly for modeling."""
-        ...
-
-    @property
-    def assembly(self) -> Compound:
-        """Printable leg and metal rod; position and connect this assembly."""
-        ...
-
-    @property
-    def tool(self) -> Part:
-        """Cavity tool snapshot at the template assembly's current placement."""
-        ...
-
-    @property
-    def housing(self) -> Part:
-        """Required surrounding material guide; never automatically added to a rest."""
-        ...
-
-    @property
-    def mount_joint(self) -> RigidJoint:
-        """Installation reference at the center of the nut-seat edge."""
-        ...
-
-    def install(
-        self, mount: RigidJoint, *, joint_label: str = "leg",
-        angular_range: tuple[float, float] = (-180, 180),
-    ) -> LegInstallation:
-        """Cut mount.parent and return the new rest, hinge, leg and guide snapshots."""
-        ...
 
 
 class HingeLeg(Leg):

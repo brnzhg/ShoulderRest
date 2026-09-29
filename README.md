@@ -6,7 +6,7 @@ This is a build123d project for a 3D-printed violin shoulder rest. The shoulder 
 ### Leg Housing
 This is a part that connects the Kun leg (a rubber foot attached to a machine screw) to the rest. It has a hole for a metal rod which slots into the rest body. It also has holes for holding a nut and for the leg screw into.
 
-`build_hinge_leg()` implements the `Leg` interface: `assembly` contains the printable `part` and a 2 × 20 mm metal rod, `tool` cuts its cavity and rod insertion slots, and `housing` shows the surrounding material to retain. Position the assembly; use `part` alone for printing. The part exposes labeled face groups through `part.tags`.
+`build_hinge_leg()` implements the `Leg` interface: `assembly` contains the printable `part` and a 2 × 20 mm metal rod, `tool` cuts its cavity and rod insertion slots, and `housing` shows the surrounding material to retain. Position the assembly; use `part` alone for printing.
 
 `LegParameters(rod=RodParameters(...), kun=KunParameters(...))` separates stock hardware from the printed body's dimensions. Bore and cavity clearances are added to the rod dimensions. Reusable Kun screw-hole and nut-slot faces, with their own parameters, live in `shoulder_rest.parts.kun`.
 
@@ -89,7 +89,7 @@ Keep parts modular and parameterizable, with readable, idiomatic build123d code.
 
 Use `BuildLine`, `BuildSketch`, and `BuildPart` for procedural geometry. Reusable geometry helpers use private builders and return local shapes for explicit insertion; assembly placement and joint connections use direct shape operations.
 
-Prioritize readable construction: compose recognizable shapes and use symmetry where it expresses the design clearly. Keep coordinate-heavy outlines for geometry that needs them, and name dimensions by their role in the part.
+Prioritize readable construction: compose recognizable shapes and use symmetry where it expresses the design clearly. Keep coordinate-heavy outlines for geometry that needs them, and name dimensions by their role in the part. Add tags only when a concrete downstream use benefits from them; prefer capturing geometry during construction when that simplifies later selection.
 
 ## Tooling
 Use Python 3.12 and [uv](https://docs.astral.sh/uv/) to install the locked environment:

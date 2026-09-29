@@ -35,23 +35,10 @@ class HingeLegTests(unittest.TestCase):
         for point in ((0, 1.5, 0), (4, y, 0), (4, y, 7.5)):
             with self.subTest(wall=point):
                 self.assertTrue(leg.is_inside(point))
-        seat = leg.tags["nut_floor"][0]
-        roof = leg.tags["nut_roof"][0]
-        self.assertAlmostEqual(roof.center().Z - seat.center().Z, 3.4)
-        self.assertAlmostEqual(seat.bounding_box().size.Y, 8.65)
 
-    def test_named_faces_and_joints_follow_placement(self) -> None:
-        tags = self.leg.tags
-        self.assertEqual(
-            {name: len(faces) for name, faces in tags.items()},
-            {"rod_bore": 1, "nut_floor": 1, "nut_roof": 1, "screw_passage": 16, "side_faces": 2},
-        )
+    def test_joints_follow_placement(self) -> None:
         placement = Location((10, -20, 30), (20, 30, 40))
         moved = self.leg.moved(placement)
-        for name, faces in tags.items():
-            for original, actual in zip(faces, moved.tags[name]):
-                self.assertLess((original.moved(placement).center() - actual.center()).length, 1e-6)
-                self.assertEqual(actual.label, name)
         for name, joint in moved.joints.items():
             self.assertIs(joint.parent, moved)
             self.assertEqual(joint.location, placement * self.leg.joints[name].location)
@@ -67,12 +54,10 @@ class HingeLegTests(unittest.TestCase):
                 leg = build_hinge_leg(replace(LegParameters(), **changes)).part
                 self.assertTrue(leg.is_valid)
                 self.assertEqual(len(leg.solids()), 1)
-                self.assertTrue(all(leg.tags.values()))
                 self.assertAlmostEqual(leg.bounding_box().size.X, leg.parameters.width, places=5)
-                self.assertAlmostEqual(
-                    leg.tags["rod_bore"][0].bounding_box().size.Y,
-                    leg.parameters.rod_hole_diameter, places=5,
-                )
+                bore_radius = leg.parameters.rod_hole_diameter / 2
+                self.assertFalse(leg.is_inside((0, bore_radius - 0.01, 0)))
+                self.assertTrue(leg.is_inside((0, bore_radius + 0.01, 0)))
 
     def test_invalid_parameters(self) -> None:
         for changes in (
@@ -148,7 +133,8 @@ class LegInstallationTests(unittest.TestCase):
     def test_changed_stock_updates_bore_slot_length_and_housing(self) -> None:
         leg = build_hinge_leg(LegParameters(rod=RodParameters(diameter=3, length=24)))
         self.assertEqual(leg.rod.bounding_box().size, Vector(24, 3, 3))
-        self.assertAlmostEqual(leg.part.tags["rod_bore"][0].bounding_box().size.Y, 3.2)
+        self.assertFalse(leg.part.is_inside((0, 1.59, 0)))
+        self.assertTrue(leg.part.is_inside((0, 1.61, 0)))
         self.assertAlmostEqual(leg.tool.bounding_box().size.X, 25)
         self.assertAlmostEqual(leg.housing.bounding_box().size.X, 27)
         self.assertTrue(leg.tool.is_inside((10, 1, 1.5)))

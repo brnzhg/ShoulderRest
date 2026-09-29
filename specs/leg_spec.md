@@ -7,7 +7,7 @@ Source: [Onshape Hinge Slot Leg](https://cad.onshape.com/documents/4b6fd83d4ef91
 `build_hinge_leg(LegParameters(...), CavityParameters(...))` returns `HingeLeg`, implementing the `Leg` protocol:
 
 - `assembly`: printable leg and metal rod as separate children. Its `rod`, `screw`, `nut`, and `mount` rigid joints position the complete assembly.
-- `part`: printable `HingeLegPart` child, for export and face tags. `HingeLeg.rod` exposes the metal hardware child.
+- `part`: printable `HingeLegPart` child, for export. `HingeLeg.rod` exposes the metal hardware child.
 - `tool`: cavity and rod insertion slots, as an independent snapshot.
 - `housing`: symmetric surrounding-material guide with the cavity removed. It is a modeling guide, not a strength guarantee.
 - `mount_joint`: installation frame on `assembly`. Positioning this assembly also positions subsequently retrieved tool/guide snapshots; leave the individual children in their local frames.
@@ -76,6 +76,6 @@ The reusable Kun profiles return fresh `Face` objects: `screw_hole_face(kun)` li
 - Cutter: 0.1 mm general clearance plus 0.1 mm extra underside clearance. Rod insertion channel: 2.1 mm wide, 3 mm run, 0.2/1.1 mm corner radii, extruded across 21 mm.
 - Guide: 2 mm nominal body margin and 1 mm rod-end caps. Its symmetric underside fills the source Dummy Housing's one-sided notch, adding approximately 183.355308 mm³; it otherwise contains the source guide exactly.
 
-Default leg and cutter match their Onshape solids by volume and two-way Boolean difference. `part.tags` exposes labeled face groups: `rod_bore`, `nut_floor`, `nut_roof`, `screw_passage`, and `side_faces`. Retrieve tags after positioning; they are world-space snapshots of the generated leg and do not track later Boolean edits.
+Default leg and cutter match their Onshape solids by volume and two-way Boolean difference.
 
 Preview: `uv run python -m shoulder_rest.parts.leg`. Tests: `uv run python -m unittest discover -s tests`.
