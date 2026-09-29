@@ -4,7 +4,10 @@ from copy import deepcopy
 from math import isfinite
 from typing import Literal, Protocol, Sequence
 
-from build123d import Compound, Edge, Face, Location, Plane, RigidJoint, Side, Solid, Vector, Wire
+from build123d import (
+    BuildLine, BuildPart, BuildSketch, Compound, Face, Line, Location, Mode, Plane,
+    RigidJoint, Side, Solid, Spline, Vector, Wire, extrude, insert, make_face,
+)
 
 
 class ViolinOutline(Protocol):
@@ -91,24 +94,27 @@ class SplineViolinOutline(ViolinOutline):
         if any(a[1] >= b[1] for a, b in zip(points, points[1:])):
             raise ValueError("Outline points must have strictly increasing Y")
 
-        self._right = Wire(Edge.make_spline(list(points)))
+        with BuildLine(mode=Mode.PRIVATE) as right:
+            Spline(*points)
+        self._right = Wire(right.edges())
         self._left = self._right.mirror(Plane.YZ)
         self._mount_location = Location((self._right @ 1 + self._left @ 1) / 2)
-        boundary = Wire(
-            [
-                *self._right.edges(),
-                Edge.make_line(self._right @ 1, self._left @ 1),
-                *self._left.edges(),
-                Edge.make_line(self._left @ 0, self._right @ 0),
-            ]
-        )
-        footprint = Face(boundary)
+        with BuildSketch(mode=Mode.PRIVATE) as outline:
+            with BuildLine():
+                insert(self._right)
+                Line(self._right @ 1, self._left @ 1)
+                insert(self._left)
+                Line(self._left @ 0, self._right @ 0)
+            make_face()
+        footprint = outline.face()
         if not footprint.is_valid or footprint.area <= 0:
             raise ValueError("Outline points do not form a valid block footprint")
 
         self._right_attachment = self._inward_curve(attachment_offset, footprint)
         self._left_attachment = self._right_attachment.mirror(Plane.YZ)
-        self._block = Solid.extrude(footprint, (0, 0, block_thickness))
+        with BuildPart(mode=Mode.PRIVATE) as block:
+            extrude(footprint, amount=block_thickness, dir=(0, 0, 1))
+        self._block = block.solid()
         self._block.label = "Violin block"
         self.add_mount_joint(self._block, label="shoulder")
 

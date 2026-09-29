@@ -6,7 +6,9 @@ This is a build123d project for a 3D-printed violin shoulder rest. The shoulder 
 ### Leg Housing
 This is a part that connects the Kun leg (a rubber foot attached to a machine screw) to the rest. It has a hole for a metal rod which slots into the rest body. It also has holes for holding a nut and for the leg screw into.
 
-`build_hinge_leg()` implements the `Leg` interface: `part` is the printable leg, `tool` cuts its cavity and rod insertion slots, and `housing` shows the surrounding material to retain. Parameters are grouped into `LegParameters` and `CavityParameters`. The part also exposes labeled face groups through `part.tags`.
+`build_hinge_leg()` implements the `Leg` interface: `assembly` contains the printable `part` and a 2 × 20 mm metal rod, `tool` cuts its cavity and rod insertion slots, and `housing` shows the surrounding material to retain. Position the assembly; use `part` alone for printing. The part exposes labeled face groups through `part.tags`.
+
+`LegParameters(rod=RodParameters(...), kun=KunParameters(...))` separates stock hardware from the printed body's dimensions. Bore and cavity clearances are added to the rod dimensions. Reusable Kun screw-hole and nut-slot faces, with their own parameters, live in `shoulder_rest.parts.kun`.
 
 ```python
 from shoulder_rest.parts.leg import Leg, build_hinge_leg
@@ -15,10 +17,10 @@ leg: Leg = build_hinge_leg()
 installed = leg.install(rest.joints["leg_mount"], joint_label="left_leg")
 rest = installed.rest  # New cut solid; existing rest joints are preserved.
 rest.joints["left_leg"].connect_to(installed.rod_joint, angle=15)
-# Include rest and installed.leg in the final assembly.
+# Include rest and installed.leg (printed body + metal rod) in the final assembly.
 ```
 
-The rest's rigid mount matches the center of the nut-seat edge. Mount X follows the hinge rod; mount Z points into the rest. Complete all installations before connecting assembly joints, using joints from the latest returned rest. Neither the input rest nor the leg template is modified. See [the leg spec](specs/leg_spec.md) for placement and repeated installations. Preview all three shapes with `uv run python -m shoulder_rest.parts.leg`.
+The rest's rigid mount matches the center of the nut-seat edge. Mount X follows the hinge rod; mount Z points into the rest. Complete all installations before connecting assembly joints, using joints from the latest returned rest. Neither the input rest nor the leg template is modified. See [the leg spec](specs/leg_spec.md) for placement and repeated installations. Preview the assembly and tools with `uv run python -m shoulder_rest.parts.leg`.
 
 ### Rest Body
 This is the main part defining the shoulder rest body. It is roughly a bar shape curved something like an S. The top of the bar has a complex contour to fit the player body, whereas the bottom facing the violin is totally flat for better printing.
@@ -84,6 +86,10 @@ uv run python -m shoulder_rest.parts.shoulder
 
 ## Project Guidelines
 Keep parts modular and parameterizable, with readable, idiomatic build123d code. Use classes and build123d base classes where appropriate. Model dimensions are in millimeters.
+
+Use `BuildLine`, `BuildSketch`, and `BuildPart` for procedural geometry. Reusable geometry helpers use private builders and return local shapes for explicit insertion; assembly placement and joint connections use direct shape operations.
+
+Prioritize readable construction: compose recognizable shapes and use symmetry where it expresses the design clearly. Keep coordinate-heavy outlines for geometry that needs them, and name dimensions by their role in the part.
 
 ## Tooling
 Use Python 3.12 and [uv](https://docs.astral.sh/uv/) to install the locked environment:

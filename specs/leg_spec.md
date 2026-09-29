@@ -6,11 +6,12 @@ Source: [Onshape Hinge Slot Leg](https://cad.onshape.com/documents/4b6fd83d4ef91
 
 `build_hinge_leg(LegParameters(...), CavityParameters(...))` returns `HingeLeg`, implementing the `Leg` protocol:
 
-- `part`: printable `HingeLegPart`, with `rod`, `screw`, `nut`, and `mount` rigid joints.
+- `assembly`: printable leg and metal rod as separate children. Its `rod`, `screw`, `nut`, and `mount` rigid joints position the complete assembly.
+- `part`: printable `HingeLegPart` child, for export and face tags. `HingeLeg.rod` exposes the metal hardware child.
 - `tool`: cavity and rod insertion slots, as an independent snapshot.
 - `housing`: symmetric surrounding-material guide with the cavity removed. It is a modeling guide, not a strength guarantee.
-- `mount_joint`: installation frame on `part`. Positioning this part also positions subsequently retrieved tool/guide snapshots.
-- `install(rest_mount, joint_label=..., angular_range=(-180, 180))`: returns `LegInstallation` containing a new cut `rest`, independent `leg`, `rod_joint`, and positioned `tool`/`housing` snapshots. Neither input is modified.
+- `mount_joint`: installation frame on `assembly`. Positioning this assembly also positions subsequently retrieved tool/guide snapshots; leave the individual children in their local frames.
+- `install(rest_mount, joint_label=..., angular_range=(-180, 180))`: returns `LegInstallation` containing a new cut `rest`, independent `leg` assembly (including the rod), `rod_joint`, and positioned `tool`/`housing` snapshots. Neither input is modified.
 
 Installation adds a `RevoluteJoint` to the returned rest and preserves existing joint frames. It does not add housing material. Install on a single-solid `Part` or `Solid` before nesting or connecting assembly joints. A missing intersection, disconnected result, or duplicate hinge label raises `ValueError`.
 
@@ -45,6 +46,30 @@ assembly = Compound(children=[rest, left.leg, right.leg])
 Use joints on the **latest returned rest** after multiple cuts. Each installed rod frame is clocked so angle zero reproduces its cutting pose; positive angles follow the right-hand rule about mount +X. Angle limits describe kinematics, not a collision-free range. The cutter provides the source's clearances; check collisions for the chosen angles and rest shape. Tool and housing snapshots remain in the installation pose when the leg rotates.
 
 ## Geometry and references
+
+The printed leg and cavity share the lower side profile (rounded nose, underside, and rear relief). The printed body adds the raised nut housing. The cavity adds a rectangular nose movement allowance, extends the underside by `bottom_clearance`, then offsets the perimeter by `clearance` with sharp corners. Rod insertion slots are added after extrusion; holes and chamfers do not affect the shared profile.
+
+Private `BuildSketch` helpers construct the side profiles in local XY, where horizontal corresponds to body Y and vertical to body Z. `BuildPart` places them on YZ planes for extrusion. Kun helpers retain their public XY screw-hole and YZ nut-slot frames. Helpers do not add geometry to a caller's active builder; the caller explicitly inserts their output.
+
+The rod channel combines a diamond seat with horizontal and upright rectangles, then rounds the two turning corners. The Kun screw opening constructs its upper boundary from a circular arc and straight segments, then mirrors it across the screw centerline.
+
+Hardware and fits are configured separately:
+
+```python
+from shoulder_rest.parts.kun import KunParameters, screw_hole_face, nut_slot_face
+from shoulder_rest.parts.leg import RodParameters, LegParameters, CavityParameters
+
+parameters = LegParameters(
+    rod=RodParameters(diameter=2, length=20),
+    kun=KunParameters(nut_slot_width=8.65, nut_slot_height=3.4),
+    rod_bore_clearance=0.2,
+)
+leg = build_hinge_leg(parameters, CavityParameters(rod_length_clearance=1))
+```
+
+The bore is rod diameter + 0.2 mm; insertion-slot width is diameter + 0.1 mm; its outer corner radius is rod radius + 0.1 mm; tool length is rod length + 1 mm total (0.5 mm per end). These allowances are independent fields so changing metal stock updates all dependent geometry without conflating radial and diametral fits. The displayed rod uses the actual stock dimensions. Its axial spin is visually indistinguishable, so it moves with the printed leg as a single assembly.
+
+The reusable Kun profiles return fresh `Face` objects: `screw_hole_face(kun)` lies in XY at the nominal screw axis, for extrusion along Z; `nut_slot_face(kun)` is centered in YZ, with width along Y and height along Z, for extrusion along X. Position/rotate the faces with build123d `Location` before extruding. Their fitted opening dimensions already include the intended fit; they do not model the metal nut or Kun foot.
 
 - Printed leg: 12 mm wide; 6.2 mm rod housing; 2.2 mm bore; 1.5 mm nose radii. Nut slot: 8.65 × 3.4 mm, with 2 mm walls. Rear relief: 20° from vertical. Outside chamfers: 0.3 mm.
 - Screw passage: 4 mm circular sides offset 0.1 mm along X, flat at X=1.9, tangent roof segments at 40° from -X, clipped 0.2 mm beyond the circle. This retains the source's printable profile.
