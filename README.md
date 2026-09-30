@@ -1,38 +1,41 @@
 # Shoulder Rest
 
-## Parts
-This is a build123d project for a 3D-printed violin shoulder rest. The shoulder casts, violin outline, and hinge-slot leg housing are implemented; the rest body is planned.
+Parametric build123d models for a 3D-printed violin shoulder rest. The `Shoulder`, `ViolinOutline`, and `Leg` interfaces provide geometry and attachment frames for a rest implementation. The rest body itself is planned: an approximately S-shaped bar with a shoulder contact contour and a flat face toward the violin for printing. Dimensions are in millimeters; angles are in degrees.
 
-### Leg Housing
-This is a part that connects the Kun leg (a rubber foot attached to a machine screw) to the rest. It has a hole for a metal rod which slots into the rest body. It also has holes for holding a nut and for the leg screw into.
+## Setup and previews
 
-`build_hinge_leg()` implements the `Leg` interface: `assembly` contains the printable `part` and a 2 × 20 mm metal rod, `tool` cuts its cavity and rod insertion slots, and `housing` shows the surrounding material to retain. Position the assembly; use `part` alone for printing.
+Use Python 3.12 and [uv](https://docs.astral.sh/uv/):
 
-`LegParameters(rod=RodParameters(...), kun=KunParameters(...))` separates stock hardware from the printed body's dimensions. Bore and cavity clearances are added to the rod dimensions. Reusable Kun screw-hole and nut-slot faces, with their own parameters, live in `shoulder_rest.parts.kun`.
-
-```python
-from shoulder_rest.parts.leg import Leg, build_hinge_leg
-
-leg: Leg = build_hinge_leg()
-installed = leg.install(rest.joints["leg_mount"], joint_label="left_leg")
-rest = installed.rest  # New cut solid; existing rest joints are preserved.
-rest.joints["left_leg"].connect_to(installed.rod_joint, angle=15)
-# Include rest and installed.leg (printed body + metal rod) in the final assembly.
+```powershell
+uv sync --locked
 ```
 
-The rest's rigid mount matches the center of the nut-seat edge. Mount X follows the hinge rod; mount Z points into the rest. Complete all installations before connecting assembly joints, using joints from the latest returned rest. Neither the input rest nor the leg template is modified. See [the leg spec](specs/leg_spec.md) for placement and repeated installations. Preview the assembly and tools with `uv run python -m shoulder_rest.parts.leg`.
+This installs the package and its dependencies into `.venv`. In VS Code, select `.venv/Scripts/python.exe` and start the OCP CAD Viewer extension. Preview individual components with:
 
-### Rest Body
-This is the main part defining the shoulder rest body. It is roughly a bar shape curved something like an S. The top of the bar has a complex contour to fit the player body, whereas the bottom facing the violin is totally flat for better printing.
+```powershell
+uv run python -m shoulder_rest.parts.shoulder
+uv run python -m shoulder_rest.parts.violin_outline
+uv run python -m shoulder_rest.parts.leg
+```
 
-### Violin Outline
-This is a sketch of a tracing of the violin, with a small offset. In the modelling of the Rest Body, the center of the holes for the Kun legs are constrained to sit on this curve. 
+## Interfaces for building a rest
 
-`SplineViolinOutline` implements the `ViolinOutline` interface with mirrored outlines, inward attachment curves, and a 38 mm visualization block. Choose points on the attachment curves to define a parametric guide:
+### ViolinOutline: layout and shared attachment frame
+
+`ViolinOutline` supplies local XY geometry for laying out the rest and its leg centers:
+
+- `left` and `right`: violin outline curves.
+- `left_attachment` and `right_attachment`: inward-offset curves for leg centers.
+- `attachment_point(side, fraction)`: a point at a fraction of a curve's arc length, from its lower-Y end (0) to its upper-Y end (1).
+- `block`: a positionable violin visualization with a rigid joint named `shoulder`.
+- `mount_location`: the shared attachment frame at the midpoint of the outline's top (upper-Y) closing line, on Z=0.
+- `add_mount_joint(rest, offset=...)`: adds a rigid joint named `violin` to a rest built in the outline's local frame.
+
+Use sampled attachment points to define a parametric guide; rebuild it when parameters change:
 
 ```python
 from build123d import Polyline
-from shoulder_rest.parts.violin_outline import build_violin_outline, ViolinOutline
+from shoulder_rest.parts.violin_outline import ViolinOutline, build_violin_outline
 
 violin: ViolinOutline = build_violin_outline(attachment_offset=3.0)
 guide = Polyline(
@@ -42,78 +45,68 @@ guide = Polyline(
 )
 ```
 
-Fractions measure arc length from the lower-Y end (0) to the upper-Y end (1). Rebuild the guide when parameters change. Curves stay in local XY while `violin.block` can be positioned through its `shoulder` joint; the block extends toward +Z. See [the spec](specs/violin_outline_spec.md) for frame conventions. Preview with `uv run python -m shoulder_rest.parts.violin_outline`.
+The curves stay in local XY even when the block moves. The block and rest share the same attachment point in this plane. An optional joint offset represents spacing or tilt relative to the violin. See the [outline spec](specs/violin_outline_spec.md) for tracing and frame details.
 
-`violin.mount_location` is the shared local attachment frame at the midpoint of the upper-Y closing line: `(0, 73.536, 0)` for the bundled tracing, with the outline's XYZ axes. The block's `shoulder` joint uses this frame. A rest modeled in the same local coordinate system can define its joint with `violin.add_mount_joint(rest)`; the default joint name is `violin`.
+### Shoulder: contact geometry and violin placement
 
-For an assembly with the shoulder fixed, give the rest an optional joint offset and connect both parts:
+`Shoulder` supplies `reference` geometry for inspection, an `extended` cutting tool for shaping the contact surface, and an `assembly` containing the reference cast for display. Its `violin_joint` positions the violin relative to the shoulder.
+
+Position the shoulder assembly before retrieving `reference` or `extended`: each is an independent snapshot at the current world placement. Use the extended shape in a Boolean cut after placing the rest in the same frame.
+
+The bundled implementation is loaded with `load_shoulder_cast(cast_location=..., violin_location=...)`. `cast_location` reorients both input casts; `violin_location` defines the joint in that corrected shoulder frame. File loading is hidden from rest implementations.
+
+Once the rest's cuts and leg installations are complete, connect the shared frames with the shoulder fixed:
 
 ```python
 from build123d import Location
 
-# rest is a Solid or Compound built in the outline's local frame.
+# shoulder implements Shoulder; rest was built in the outline's local frame.
 rest_joint = violin.add_mount_joint(rest, offset=Location((0, 0, 12)))
 shoulder.violin_joint.connect_to(violin.block.joints["shoulder"])
 violin.block.joints["shoulder"].connect_to(rest_joint)
 ```
 
-The offset changes the rest's joint relative to the shared frame. A +12 mm Z offset positions the rest 12 mm toward -Z relative to the violin, preserving its XY alignment; zero offset gives identical placements. Rotational offsets can model tilt about the mount point. Connect before nesting assemblies. The same rest joint can instead connect directly to `shoulder.violin_joint`.
+A +12 mm Z joint offset places the rest 12 mm toward -Z relative to the violin. Zero offset aligns their modeling frames. The rest joint can also connect directly to `shoulder.violin_joint`.
 
-### Shoulder Model
-This is a part created by a different project that is loaded here. It is a model of the violin player's shoulder/collarbone area where the rest sits. This is used to cut out the contour of the Rest Body on the face contacting the player. 
+### Leg: installation and final attachment
 
-`load_shoulder_cast()` returns the `Shoulder` interface: `reference` and `extended` provide independent shapes for modeling, `assembly` contains the reference cast for display, and `violin_joint` is a rigid attachment named `violin`. The extended cast is a cutting tool and is excluded from the assembly.
+`Leg` provides a printable `part`, an `assembly` including its metal hardware, a cavity-cutting `tool`, and a `housing` guide showing the surrounding material the rest should retain. Position the whole assembly; retrieve tool and housing snapshots afterward. The housing is a design guide and is not automatically added to the rest.
+
+Installation uses three attachment frames:
+
+| Frame | Owner | Purpose |
+| --- | --- | --- |
+| A rigid mount, e.g. `leg_mount` | Rest, defined by its implementation | Specifies the leg-hole center and orientation on the rest's mounting plane. |
+| `leg.mount_joint` | Leg template assembly | Installation reference that `install()` aligns to the rest's rigid mount. |
+| A revolute joint, e.g. `left_leg` | Returned rest, created by `install()` | Final hinge at the installed rod axis; connects to `installed.rod_joint` on the returned leg assembly. |
+
+**X and Z describe axes of the rigid installation mount.** Its X direction follows the hinge rod; its Z direction points into the rest. The hinge pivot is offset from this mount to the rod's position by the leg implementation. For a rest extending below its XY mounting plane, mount Z points toward global -Z.
 
 ```python
-from build123d import Location
-from shoulder_rest.parts.shoulder import Shoulder, load_shoulder_cast
+from shoulder_rest.parts.leg import Leg, build_hinge_leg
 
-shoulder: Shoulder = load_shoulder_cast(
-    cast_location=Location((0, 0, 0), (30, 30, -5)),
-    violin_location=Location((0, 0, 20)),
-)
-violin.block.joints["shoulder"].connect_to(shoulder.violin_joint)
-cutting_tool = shoulder.extended
+leg: Leg = build_hinge_leg()
+# rest already has a rigid joint named "leg_mount" at the desired leg-hole center.
+installed = leg.install(rest.joints["leg_mount"], joint_label="left_leg")
+rest = installed.rest
+
+# After all cuts/installations and positioning the rest against the violin:
+rest.joints["left_leg"].connect_to(installed.rod_joint, angle=15)
+# Include rest and installed.leg in the final assembly.
 ```
 
-The bundled STEP files and their loading are hidden by `load_shoulder_cast()`. For other casts, use `StepShoulder(reference_file, extended_file, cast_location=..., violin_location=...)` with build123d `Location` objects. The cast location reorients both files together; the violin location is defined in the corrected shoulder frame, so the cast transform is not applied to it again.
+`install()` returns a new cut rest with its existing joints preserved, an independent leg assembly, and positioned tool/housing snapshots. Inputs are unchanged. Angle zero reproduces the installation pose; rotating the leg leaves the cutter and housing snapshots fixed.
 
-Adjust the `cast_location` and `violin_location` arguments in the main section of `src/shoulder_rest/parts/shoulder.py` for the bundled example. Position the completed shoulder with `shoulder.assembly.locate(...)`; retrieve tool shapes afterward to get their current world placement. Connect joints before nesting assemblies. With OCP CAD Viewer open, preview both casts and the joint using:
+Complete all cuts and installations before connecting assembly joints, always using the latest returned rest's joints. Connect parts before nesting them in the final assembly. The current hinge-slot implementation receives a Kun screw leg and metal rod; its dimensions, mount construction, and repeated-installation example are in the [leg spec](specs/leg_spec.md).
 
-```powershell
-uv run python -m shoulder_rest.parts.shoulder
-```
+## Repository layout
 
-## Project Guidelines
-Keep parts modular and parameterizable, with readable, idiomatic build123d code. Use classes and build123d base classes where appropriate. Model dimensions are in millimeters.
-
-Use `BuildLine`, `BuildSketch`, and `BuildPart` for procedural geometry. Reusable geometry helpers use private builders and return local shapes for explicit insertion; assembly placement and joint connections use direct shape operations.
-
-Prioritize readable construction: compose recognizable shapes and use symmetry where it expresses the design clearly. Keep coordinate-heavy outlines for geometry that needs them, and name dimensions by their role in the part. Add tags only when a concrete downstream use benefits from them; prefer capturing geometry during construction when that simplifies later selection.
-
-## Tooling
-Use Python 3.12 and [uv](https://docs.astral.sh/uv/) to install the locked environment:
-
-```powershell
-uv sync --locked
-```
-
-This creates `.venv` and installs build123d, this package, and the `ocp-vscode` development dependency. Commit `uv.lock` to keep installations reproducible. Add runtime dependencies with `uv add` and development tools with `uv add --dev`.
-
-In VS Code, select `.venv/Scripts/python.exe` as the Python interpreter and install the OCP CAD Viewer extension. Start its viewer, then use `from ocp_vscode import show` and `show(part)` in a preview script. Keep viewer calls outside reusable model code. Run scripts with `uv run python path/to/script.py`; environment activation is optional.
-
-Check the CAD environment without opening the viewer:
-
-```powershell
-uv run python -c "from build123d import Box; print(Box(10, 20, 30).volume)"
-```
-
-The expected volume is approximately `6000` cubic millimeters.
-
-## Layout
-
-- `src/shoulder_rest/parts/`: reusable part and sketch modules.
-- `src/shoulder_rest/assets/`: model input geometry bundled in the package, loaded with `importlib.resources`.
-- `assets/`: optional reference material that is not bundled in the package.
-- `exports/`: generated STEP/STL files; contents are ignored by Git.
+- `src/shoulder_rest/parts/`: interfaces and reusable model implementations.
+- `src/shoulder_rest/assets/`: input geometry bundled with the package.
+- `assets/`: reference material, including STEP solids used by tests.
+- `tests/`: geometry and interface checks; run `uv run python -m unittest discover -s tests`.
+- `specs/`: feature geometry, frame conventions, and implementation details.
+- `exports/`: generated STEP/STL files, ignored by Git.
 - `changelog/`: optional change history.
+
+See [AGENTS.md](AGENTS.md) for contributor and coding guidance.
