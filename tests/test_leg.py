@@ -168,7 +168,7 @@ class LegInstallationTests(unittest.TestCase):
     def test_rod_and_printed_child_follow_installed_and_nested_assembly(self) -> None:
         rest = Part([Solid.make_box(40, 50, 12).moved(Location((-20, -15, -8)))])
         mount = RigidJoint("mount", rest, self.template.mount_joint.location)
-        installed = build_hinge_leg(angle=25).install(mount)
+        installed = build_hinge_leg(angle=25).install(rest, at=mount.relative_location)
         installed.attach_to(installed.rest)
         final = Compound(children=[installed.rest, installed.leg])
         final.locate(Location((12, 34, 56), (10, 20, 30)))
@@ -194,16 +194,16 @@ class LegInstallationTests(unittest.TestCase):
         mount = RigidJoint("leg_mount", rest, placement * self.template.mount_joint.location)
         keep = RigidJoint("violin", rest, placement * Location((3, 4, 5), (10, 20, 30)))
         original_volume = rest.volume
-        result = self.template.install(mount, joint_label="left_leg")
+        result = self.template.install(rest, at=mount.relative_location, joint_label="left_leg")
         self.assertEqual(rest.volume, original_volume)
         self.assertNotIn("left_leg", rest.joints)
         self.assertEqual(self.template.assembly.location, Location())
         self.assertEqual(result.rest.location, placement)
-        self.assertEqual(result.rest.joints["violin"].location, keep.location)
-        self.assertIs(result.rest.joints["violin"].parent, result.rest)
-        self.assertIsNot(result.rest.joints["violin"], keep)
+        self.assertEqual(result.rest.joints, {})
+        self.assertIs(rest.joints["violin"], keep)
         self.assertAlmostEqual(original_volume - result.rest.volume, result.tool.volume, places=5)
         self.assertEqual(result.leg.joints["mount"].location, mount.location)
+        result.attach_to(result.rest)
         hinge = result.rest.joints["left_leg"]
         tool_before = result.tool.bounding_box()
         for angle in (0, 25, -20):
@@ -219,30 +219,33 @@ class LegInstallationTests(unittest.TestCase):
         leg_pose = Location((0, 0, 0), (12, 24, 36))
         rest = Part([Solid.make_box(70, 70, 70).moved(Location((-35, -35, -35)))]).locate(rest_pose)
         mount = RigidJoint("mount", rest, rest_pose * leg_pose * self.template.mount_joint.location)
-        result = self.template.install(mount)
+        result = self.template.install(rest, at=mount.relative_location)
         new_pose = Location((-50, 12, 80), (-20, 35, 5))
         result.rest.locate(new_pose)
+        result.attach_to(result.rest)
         for angle in (0, 15, -30):
             result.rest.joints["leg"].connect_to(result.leg.joints["rod"], angle=angle)
             expected = self.template.assembly.rotate(Axis.X, angle).moved(new_pose * leg_pose)
             self.assertLess(expected.cut(result.leg).volume, 1e-6)
             self.assertLess(result.leg.cut(expected).volume, 1e-6)
 
-    def test_repeated_install_preserves_earlier_hinge(self) -> None:
+    def test_hinges_are_created_only_after_all_cuts(self) -> None:
         rest = Part([Solid.make_box(90, 60, 12).moved(Location((-45, -20, -8)))])
         left_pose = Location((-22, 0, 0), (0, 0, 10))
         right_pose = Location((22, 0, 0), (0, 0, -10))
-        left_mount = RigidJoint("left_mount", rest, left_pose * self.template.mount_joint.location)
-        RigidJoint("right_mount", rest, right_pose * self.template.mount_joint.location)
-        first = self.template.install(left_mount, joint_label="left_leg")
-        second = self.template.install(first.rest.joints["right_mount"], joint_label="right_leg")
-        self.assertIs(second.rest.joints["left_leg"].parent, second.rest)
-        self.assertEqual(second.rest.joints["left_leg"].location, first.rest.joints["left_leg"].location)
+        first = self.template.install(
+            rest, at=left_pose * self.template.mount_joint.relative_location, joint_label="left_leg",
+        )
+        second = self.template.install(
+            first.rest, at=right_pose * self.template.mount_joint.relative_location, joint_label="right_leg",
+        )
+        self.assertEqual(first.rest.joints, {})
+        self.assertEqual(second.rest.joints, {})
         for installed, pose in ((first, left_pose), (second, right_pose)):
             installed.attach_to(second.rest)
             self.assertEqual(installed.leg.location, pose)
             self.assertIs(second.rest.joints[installed.joint_label].connected_to, installed.rod_joint)
-        self.assertIsNone(first.rest.joints[first.joint_label].connected_to)
+        self.assertNotIn(first.joint_label, first.rest.joints)
         self.assertLess(second.rest.volume, first.rest.volume)
 
     def test_tools_follow_template_placement_as_independent_snapshots(self) -> None:
@@ -266,16 +269,16 @@ class LegInstallationTests(unittest.TestCase):
         template = build_hinge_leg(angle=15, angular_range=(-20, 20))
         body = Part([Solid.make_box(40, 50, 12).moved(Location((-20, -15, -8)))])
         mount = RigidJoint("mount", body, template.mount_joint.location)
-        installed = template.install(mount)
-        with self.assertRaisesRegex(ValueError, "installed hinge"):
-            installed.attach_to(body)
+        installed = template.install(body, at=mount.relative_location)
         final = installed.rest.moved(Location((10, 20, 30), (15, 25, 35)))
         installed.attach_to(final)
         expected = template.assembly.rotate(Axis.X, 15).moved(final.location)
         self.assertLess(expected.cut(installed.leg).volume, 1e-6)
         self.assertLess(installed.leg.cut(expected).volume, 1e-6)
         self.assertEqual(final.joints[installed.joint_label].angular_range, (-20, 20))
-        self.assertIsNone(installed.rest.joints[installed.joint_label].connected_to)
+        self.assertNotIn(installed.joint_label, installed.rest.joints)
+        with self.assertRaisesRegex(ValueError, "already has a joint"):
+            installed.attach_to(final)
         Compound(children=[final, installed.leg])
         with self.assertRaisesRegex(ValueError, "before nesting"):
             installed.attach_to(final)
@@ -283,12 +286,11 @@ class LegInstallationTests(unittest.TestCase):
     def test_invalid_installation_does_not_change_input(self) -> None:
         rest = Part([Solid.make_box(30, 40, 10).moved(Location((-15, -10, -5)))])
         mount = RigidJoint("mount", rest, self.template.mount_joint.location)
-        for kwargs in ({"joint_label": "mount"}, {"joint_label": ""}):
-            with self.subTest(kwargs=kwargs), self.assertRaises(ValueError):
-                self.template.install(mount, **kwargs)
+        with self.assertRaises(ValueError):
+            self.template.install(rest, at=mount.relative_location, joint_label="")
         outside = RigidJoint("outside", rest, Location((1000, 0, 0)))
         with self.assertRaisesRegex(ValueError, "does not intersect"):
-            self.template.install(outside)
+            self.template.install(rest, at=outside.relative_location)
         self.assertEqual(set(rest.joints), {"mount", "outside"})
 
 

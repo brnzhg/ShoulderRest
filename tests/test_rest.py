@@ -58,15 +58,16 @@ class DirectLeg:
     def housing(self) -> Part:
         return Part([Solid.make_cylinder(3, 4) - Solid.make_cylinder(2, 4)]).moved(self.assembly.location)
 
-    def install(self, mount: RigidJoint, *, joint_label: str = "leg") -> DirectInstallation:
-        source = mount.parent
-        tool = self.tool.moved(mount.location)
+    def install(self, body: Part | Solid, *, at: Location, joint_label: str = "leg") -> DirectInstallation:
+        source = body
+        placement = body.location * at
+        tool = self.tool.moved(placement)
         rest = (
-            source.located(Location()) - tool.moved(source.location.inverse())
+            Part(source.wrapped).located(Location()) - tool.moved(source.location.inverse())
         ).moved(source.location)
         return DirectInstallation(
-            rest, deepcopy(self.assembly), tool, self.housing.moved(mount.location),
-            mount.relative_location,
+            rest, deepcopy(self.assembly), tool, self.housing.moved(placement),
+            Location(at),
         )
 
 
@@ -195,7 +196,7 @@ class RestTests(unittest.TestCase):
         self.assertLess(rest.part.volume, original_volume)
         self.assertEqual(rest.part.global_location, pose)
         self.assertEqual(rest.violin_joint.location, geometry.violin_joint.location)
-        self.assertIsNone(rest.part.joints["instrument"].connected_to)
+        self.assertNotIn("instrument", rest.part.joints)
         for actual, source in (
             (rest.left_mount_joint, geometry.left_mount_joint),
             (rest.right_mount_joint, geometry.right_mount_joint),
@@ -250,12 +251,12 @@ class RestTests(unittest.TestCase):
             source.part, source.left_mount_joint, source.right_mount_joint, source.violin_joint,
         )
         other = SimpleRestGeometry(self.violin)
-        with self.assertRaisesRegex(ValueError, "registered on geometry.part"):
+        with self.assertRaisesRegex(ValueError, "belong to geometry.part"):
             Rest(replace(geometry, left_mount_joint=other.left_mount_joint), self.leg)
         with self.assertRaisesRegex(ValueError, "distinct"):
             Rest(replace(geometry, right_mount_joint=geometry.left_mount_joint), self.leg)
         # Replacing the body without replacing its joint properties is also invalid.
-        with self.assertRaisesRegex(ValueError, "registered on geometry.part"):
+        with self.assertRaisesRegex(ValueError, "belong to geometry.part"):
             Rest(replace(geometry, part=source.part.moved(Location((1, 0, 0)))), self.leg)
 
     def test_direct_attachment_uses_final_body_after_both_cuts(self) -> None:
@@ -264,7 +265,7 @@ class RestTests(unittest.TestCase):
         geometry.part.locate(pose)
         template = DirectLeg()
         rest = Rest(geometry, template)
-        self.assertEqual(set(rest.part.joints), set(geometry.part.joints))
+        self.assertEqual(set(rest.part.joints), {rest.left_mount_joint.label, rest.right_mount_joint.label})
         self.assertLess(rest.part.volume, rest.installations[0].rest.volume)
         for installed, mount in zip(rest.installations, (rest.left_mount_joint, rest.right_mount_joint)):
             self.assertIsInstance(installed, DirectInstallation)
@@ -280,11 +281,32 @@ class RestTests(unittest.TestCase):
         self.assertIsInstance(left, HingeLegInstallation)
         self.assertIsInstance(right, DirectInstallation)
         self.assertIs(rest.part.joints[left.joint_label].connected_to, left.rod_joint)
-        self.assertIsNone(left.rest.joints[left.joint_label].connected_to)
+        self.assertNotIn(left.joint_label, left.rest.joints)
         self.assertIs(right.attached_body, rest.part)
         self.assertTrue(rest.part.is_valid)
         self.assertEqual(len(rest.part.solids()), 1)
         self.assertEqual(len(rest.assembly.children), 3)
+
+    def test_installation_can_modify_and_transfer_the_original_body(self) -> None:
+        class InPlaceLeg(DirectLeg):
+            def install(self, body, *, at, joint_label="leg"):
+                result = super().install(body, at=at, joint_label=joint_label)
+                body.wrapped = result.rest.wrapped
+                return replace(result, rest=body)
+
+        geometry = SimpleRestGeometry(self.violin)
+        geometry.part.locate(Location((5, 10, 15), (10, 20, 30)))
+        volume = geometry.part.volume
+        violin_frame = geometry.violin_joint.location
+        left_frame = geometry.left_mount_joint.location
+        right_frame = geometry.right_mount_joint.location
+        rest = Rest(geometry, InPlaceLeg())
+        self.assertIs(rest.part, geometry.part)
+        self.assertIs(geometry.part.parent, rest.assembly)
+        self.assertLess(rest.part.volume, volume)
+        self.assertEqual(rest.violin_joint.location, violin_frame)
+        self.assertEqual(rest.left_mount_joint.location, left_frame)
+        self.assertEqual(rest.right_mount_joint.location, right_frame)
 
     def test_invalid_dimensions(self) -> None:
         for changes in (

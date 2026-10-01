@@ -1,9 +1,6 @@
 """Shared construction and placement for two-legged shoulder rests."""
 
-from copy import deepcopy
-from typing import cast
-
-from build123d import Compound, Part, RigidJoint, Solid
+from build123d import Compound, Location, Part, RigidJoint, Solid
 
 from shoulder_rest.parts.leg import Leg, LegInstallation
 from shoulder_rest.parts.rest_geometry import RestGeometry
@@ -14,23 +11,11 @@ _LEFT_INSTALLATION_LABEL = "left_leg"
 _RIGHT_INSTALLATION_LABEL = "right_leg"
 
 
-def _copy_body(body: Part | Solid) -> Part | Solid:
-    """Copy the body and joint frames without copying connected reference parts."""
-    part = deepcopy(body, {id(body.joints): {}})
-    for label, joint in body.joints.items():
-        memo: dict[int, object] = {id(body): part}
-        if joint.connected_to is not None:
-            memo[id(joint.connected_to)] = None
-        part.joints[label] = deepcopy(joint, memo)
-    return part
-
-
 class Rest:
     """Install and assemble two legs on a finished RestGeometry.
 
-    Copies the supplied body and its joint frames, preserving their placement.
-    Existing reference connections remain on the input geometry only. Installs
-    two independent legs, delegates their final attachment, and owns the
+    Reads the geometry's typed local frames and passes its body to installation.
+    Installs two independent legs, delegates their final attachment, and owns the
     completed assembly. Move the whole assembly, never its individual children.
     The supplied leg template serves both sides unless right_leg is provided.
     """
@@ -46,31 +31,28 @@ class Rest:
             raise ValueError("Rest body must be one valid solid")
         mounts = (geometry.left_mount_joint, geometry.right_mount_joint, geometry.violin_joint)
         for joint in mounts:
-            if (
-                not isinstance(joint, RigidJoint)
-                or joint.parent is not body
-                or body.joints.get(joint.label) is not joint
-            ):
-                raise ValueError("Geometry joints must be rigid joints registered on geometry.part")
-        if len({joint.label for joint in mounts}) != 3:
-            raise ValueError("Geometry must provide three distinct attachment joints")
-        left_mount_label = mounts[0].label
-        right_mount_label = mounts[1].label
-        violin_label = mounts[2].label
+            if joint.parent is not body:
+                raise ValueError("Geometry joints must belong to geometry.part")
+        left_frame, right_frame, violin_frame = (
+            Location(joint.relative_location) for joint in mounts
+        )
 
-        part = _copy_body(body)
         left = leg.install(
-            cast(RigidJoint, part.joints[left_mount_label]), joint_label=_LEFT_INSTALLATION_LABEL,
+            body, at=left_frame, joint_label=_LEFT_INSTALLATION_LABEL,
         )
         right_template = leg if right_leg is None else right_leg
         right = right_template.install(
-            cast(RigidJoint, left.rest.joints[right_mount_label]), joint_label=_RIGHT_INSTALLATION_LABEL,
+            left.rest, at=right_frame, joint_label=_RIGHT_INSTALLATION_LABEL,
         )
         self._part = right.rest
         self._installations = (left, right)
-        # Cuts replace the body and its joints; retain references only after both cuts.
-        self._left_mount_joint = cast(RigidJoint, self._part.joints[left_mount_label])
-        self._right_mount_joint = cast(RigidJoint, self._part.joints[right_mount_label])
+        # Create the rest's public frames once, on the finished body.
+        self._left_mount_joint = RigidJoint(
+            geometry.left_mount_joint.label, self._part, self._part.location * left_frame,
+        )
+        self._right_mount_joint = RigidJoint(
+            geometry.right_mount_joint.label, self._part, self._part.location * right_frame,
+        )
         left.attach_to(self._part)
         right.attach_to(self._part)
         self._assembly = Compound(
@@ -78,7 +60,7 @@ class Rest:
         )
         # The external joint belongs to the assembly so alignment moves all parts.
         self._violin_joint = RigidJoint(
-            "violin", self._assembly, self._part.joints[violin_label].location,
+            "violin", self._assembly, self._part.location * violin_frame,
         )
 
     @property

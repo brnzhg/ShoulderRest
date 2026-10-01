@@ -6,7 +6,7 @@
 - `left_mount_joint`, `right_mount_joint`: rigid installation joints registered on `part`. Mount X follows the rod; mount Z points into the material.
 - `violin_joint`: a rigid joint registered on the same `part`, defining its violin attachment, including any spacing and tilt.
 
-The three joints must be distinct and belong to the final body, including after Boolean operations. Implementations choose their labels; `Rest` uses the properties to find them. `Rest` passes distinct installation labels (`left_leg` and `right_leg`) to the leg implementations; those implementations own any attachment joints and resolve label conflicts. A geometry implementation can satisfy the protocol structurally; it need not inherit from `Rest` or `RestGeometry`.
+The three joints must be distinct and belong to the final body, including after Boolean operations. Implementations choose their labels; `Rest` reads local frames directly from the typed properties before installation. `Rest` passes distinct installation labels (`left_leg` and `right_leg`) to the leg implementations; those implementations own any attachment joints and resolve label conflicts. A geometry implementation can satisfy the protocol structurally; it need not inherit from `Rest` or `RestGeometry`.
 
 `SimpleRestGeometry` in `parts/simple_rest.py` builds an inspectable rounded blank and its joints, without a leg dependency. `Rest(geometry, leg, right_leg=None)` consumes that interface. The supplied template is used independently for both sides unless a separate `right_leg` is supplied. Attachment settings such as angles and limits belong to the leg implementation.
 
@@ -20,13 +20,17 @@ body = (local_blank - local_tool).moved(pose)
 # Define final joints with world locations pose * local_attachment_frame.
 ```
 
-Alternatively, perform the Boolean in a common world frame and define joints in that same frame. The resulting part and its registered joints must describe the same placement. The geometry implementation can use those joints to position reference parts; existing connections remain on the original geometry.
+Alternatively, perform the Boolean in a common world frame and define joints in that same frame. The resulting part and its registered joints must describe the same placement. The geometry implementation can use those joints to position reference parts before handing the body to `Rest`. Construction does not rely on carrying those joints or connections through Boolean cuts.
 
-`Rest` copies the body's shape, placement, and joint frames, omitting external connection links from its working copy. It installs both legs using the copied mounts, then calls each `LegInstallation.attach_to(final_body)` after both installations are complete. The result resolves its own attachment on that final body before the components are nested. `Rest` has no knowledge of the resulting joint types, number of joints, or connection settings. The original geometry and references are unchanged, so the geometry can be inspected or used to construct another rest.
+`Rest` snapshots the three `relative_location` frames and passes the original body to `leg.install(body, at=local_frame, joint_label=...)`. Each result supplies the body for the next installation, retaining the same modeling frame and placement. There is no defensive body copy, joint-dictionary lookup, or type cast in `Rest`.
+
+After both installations, `Rest` creates its public mount joints on the final body and calls both results' `attach_to(final_body)`. Each result uses retained local placement data to create its own attachment joints or directly position its leg. No attachment joint must survive an intermediate cut. `Rest` has no knowledge of those joint types or connection settings.
+
+Supplying a geometry transfers its body for construction and final assembly nesting. A leg implementation may modify it in place or return a new shape; callers should not rely on input immutability. The bundled hinge implementation uses Boolean results and leaves the input body unchanged, but this is not an orchestration requirement.
 
 The completed `assembly` is a persistent Compound containing the final `part` and both installed leg assemblies. Its typed `violin_joint` reproduces the geometry's violin frame on the **whole assembly**, preserving the initial fit. No additional placement step is needed when the geometry was already positioned.
 
-Typed joint properties retain references captured after the final cut. Each cut replaces the body and its joints, so construction resolves joints again between cuts; later placement updates the existing joints through their owning parts.
+Typed joint properties retain references created after the final cut. Later placement updates the existing joints through their owning parts.
 
 `position_on(violin)` is available for subsequent alignment to a violin. Call it before nesting the rest and violin in a scene; it can be repeated while they remain top-level. Connections do not continuously track later violin movement. Move the whole assembly to keep its children together.
 

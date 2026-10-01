@@ -73,13 +73,13 @@ The rest's `violin_joint` belongs to its whole assembly, so the body and both le
 
 The rigid installation mount defines the leg's position and orientation. Its Z direction points into the rest; for the hinge implementation, X follows the rod axis. Final attachment details belong entirely to the leg implementation.
 
-`leg.install(mount, joint_label=...)` returns a `LegInstallation`: a new body, independent leg assembly, tool and housing snapshots, and an `attach_to(final_body)` method. `Rest` installs both legs, passes the final body to each result's `attach_to()`, and nests the finished components. An implementation can use hinges, rigid joints, multiple joints, or direct placement.
+`leg.install(body, at=local_frame, joint_label=...)` returns a `LegInstallation`: the resulting body, independent leg assembly, tool and housing snapshots, and an `attach_to(final_body)` method. `Rest` installs both legs, passes the final body to each result's `attach_to()`, and nests the finished components. `at` is a `Location` in the body's local modeling frame, such as `geometry.left_mount_joint.relative_location`. Attachment joints are created on the final body. An implementation can use hinges, rigid joints, multiple joints, or direct placement.
 
 Configure attachment settings on the chosen leg implementation. For example, `build_hinge_leg(angle=15, angular_range=(-30, 30))` selects its final hinge angle and limits in degrees. See the [leg spec](specs/leg_spec.md) for its attachment behavior and cavity geometry.
 
 ### Rest: shared behavior and body implementations
 
-`RestGeometry` supplies a finished body and three typed rigid joints on that body: `left_mount_joint`, `right_mount_joint`, and `violin_joint`. A geometry implementation may position the shoulder and violin and cut the contact contour before exposing that result. `Rest(geometry, leg)` copies it, preserves its placement, installs both legs, and creates the completed assembly.
+`RestGeometry` supplies a finished body and three typed rigid joints on that body: `left_mount_joint`, `right_mount_joint`, and `violin_joint`. A geometry implementation may position the shoulder and violin and cut the contact contour before exposing that result. `Rest(geometry, leg)` reads those joints' local frames directly, installs both legs, and creates the completed assembly. It does not copy the geometry or look up its joints by label. Supplying the geometry transfers its body for construction and nesting; a leg implementation may modify or replace it.
 
 ```python
 from shoulder_rest.parts.leg.hinge_leg import build_hinge_leg

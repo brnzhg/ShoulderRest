@@ -11,10 +11,10 @@ Source: [Onshape Hinge Slot Leg](https://cad.onshape.com/documents/4b6fd83d4ef91
 - `tool`: cavity and rod insertion slots, as an independent snapshot.
 - `housing`: symmetric surrounding-material guide with the cavity removed. It is a modeling guide, not a strength guarantee.
 - `mount_joint`: installation frame on `assembly`. Positioning this assembly also positions subsequently retrieved tool/guide snapshots; leave the individual children in their local frames.
-- `install(rest_mount, joint_label=...)`: returns `HingeLegInstallation`, implementing `LegInstallation`. It contains the new cut `rest`, independent `leg` assembly, and positioned `tool`/`housing` snapshots. Its `attach_to(final_body)` resolves the hinge on the latest body and connects the rod at the angle configured on the template. Neither installation input is modified.
+- `install(body, at=local_frame, joint_label=...)`: returns `HingeLegInstallation`, implementing `LegInstallation`. It contains the new cut `rest`, independent `leg` assembly, and positioned `tool`/`housing` snapshots. Its `attach_to(final_body)` creates a hinge on the final body using a retained local rod axis, then connects the rod at the configured angle. Neither installation input is modified.
 - `angle` and `angular_range` are template constructor options in degrees. The range must be finite and include zero; the angle must be finite and within that range. These settings are captured by each installation. `rod_joint`, `joint_label`, and `angle` are hinge-specific result details, outside the generic interface.
 
-Installation adds a `RevoluteJoint` to the returned rest and preserves existing joint frames. It does not add housing material. Install on a single-solid `Part` or `Solid` before nesting or connecting assembly joints. A missing intersection, disconnected result, or duplicate hinge label raises `ValueError`.
+Installation cuts a single-solid `Part` or `Solid`, preserving its modeling frame and placement. The returned body contains geometry only, without the source's joint or connection metadata. The Boolean result leaves the input body unchanged; the generic `Leg` contract also permits implementations that modify the body in place. Installation does not add housing material. A missing intersection or disconnected result raises `ValueError`. Final attachment rejects a duplicate hinge label or nested body/leg.
 
 ## Frames and use
 
@@ -33,7 +33,7 @@ rest.position_on(violin)
 assembly = rest.assembly
 ```
 
-For lower-level modeling, `Leg.install()` accepts a rigid joint on an un-nested body. Complete all cuts, then call each installation's `attach_to(final_body)` before nesting the body or legs. The method retrieves its revolute joint from the final body and applies the configured angle; the caller does not need to retrieve or connect that joint. Each installed rod frame is clocked so angle zero reproduces its cutting pose; positive angles follow the right-hand rule about mount +X. Angle limits describe kinematics, not a collision-free range. Tool and housing snapshots remain in the installation pose when the leg rotates.
+For lower-level modeling, `Leg.install(body, at=...)` accepts a `Location` in the un-nested body's local modeling frame. For an existing rigid mount, pass `mount.relative_location`, not its world location. Complete all cuts, then call each installation's `attach_to(final_body)` before nesting the body or legs. The method creates its revolute joint on the final body and applies the configured angle; the caller does not need to retrieve or connect that joint. Each installed rod frame is clocked so angle zero reproduces its cutting pose; positive angles follow the right-hand rule about mount +X. Angle limits describe kinematics, not a collision-free range. Tool and housing snapshots remain in the installation pose when the leg rotates.
 
 ## Geometry and references
 

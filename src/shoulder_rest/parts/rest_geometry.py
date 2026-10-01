@@ -12,11 +12,12 @@ class RestGeometry(Protocol):
     and violin. Implementations may position reference parts and subtract the
     shoulder before defining these joints on the final body. Joint labels are
     implementation details; consumers use the typed properties.
+    Passing this geometry to Rest transfers its body for construction and
+    assembly; implementations may modify or replace it during installation.
 
     Dimensions are in millimeters and angles in degrees. Installation mount Z
     points into the body; X sets orientation (the rod axis for hinge legs).
-    The violin joint carries
-    the shared attachment frame, including spacing and tilt.
+    The violin joint carries the shared attachment frame, including spacing and tilt.
     """
 
     @property

@@ -317,14 +317,19 @@ class HingeLegInstallation:
     joint_label: str
     rod_joint: RigidJoint
     angle: float
+    local_axis: Axis
+    angular_range: tuple[float, float]
 
     def attach_to(self, final_body: Part | Solid) -> None:
-        """Resolve the hinge after all cuts and connect the installed rod."""
+        """Create the hinge on the finished body and connect the installed rod."""
         if final_body.parent is not None or final_body.children or self.leg.parent is not None:
             raise ValueError("Attach the leg before nesting the body or leg in an assembly")
-        hinge = final_body.joints.get(self.joint_label)
-        if not isinstance(hinge, RevoluteJoint) or hinge.parent is not final_body:
-            raise ValueError(f"Final body must contain the installed hinge {self.joint_label!r}")
+        if self.joint_label in final_body.joints:
+            raise ValueError(f"Final body already has a joint named {self.joint_label!r}")
+        hinge = RevoluteJoint(
+            self.joint_label, final_body, self.local_axis.located(final_body.location),
+            angular_range=self.angular_range,
+        )
         hinge.connect_to(self.rod_joint, angle=self.angle)
 
 
@@ -413,23 +418,20 @@ class HingeLeg(Leg):
         return self._nut_joint
 
     def install(
-        self, mount: RigidJoint, *, joint_label: str = "leg",
+        self, body: Part | Solid, *, at: Location, joint_label: str = "leg",
     ) -> HingeLegInstallation:
-        source = mount.parent
+        source = body
         if not isinstance(source, (Part, Solid)) or source.parent is not None or source.children:
             raise ValueError("Install on an un-nested Part or Solid before assembly")
-        if source.joints.get(mount.label) is not mount:
-            raise ValueError("Mount must belong to the current rest")
-        if not joint_label or joint_label in source.joints:
+        if not joint_label:
             raise ValueError("Choose a new, nonempty hinge joint label")
-        if any(j.connected_to is not None for j in source.joints.values()):
-            raise ValueError("Install legs before connecting the rest's assembly joints")
 
-        placement = mount.location * self.mount_joint.relative_location.inverse()
+        local_placement = at * self.mount_joint.relative_location.inverse()
+        placement = source.location * local_placement
         tool = self._tool.moved(placement)
-        # Cut in the rest's local frame so copied joints keep their coordinates.
+        # Work on geometry only; reference joints/connections are not construction data.
         rest_placement = source.location
-        local_rest = source.located(Location())
+        local_rest = Part(source.wrapped, label=source.label, color=source.color).located(Location())
         local_tool = tool.moved(rest_placement.inverse())
         rest = (local_rest - local_tool).moved(rest_placement)
         if not rest.is_valid or len(rest.solids()) != 1:
@@ -438,14 +440,14 @@ class HingeLeg(Leg):
             raise ValueError("Cavity tool does not intersect the rest")
 
         leg = deepcopy(self._assembly).locate(placement)
-        rod_axis = Axis(placement.position, placement.x_axis.direction)
-        hinge = RevoluteJoint(joint_label, rest, rod_axis, angular_range=self._angular_range)
-        # Clock the installed rod frame to this hinge's reference. This makes
+        local_axis = Axis(local_placement.position, local_placement.x_axis.direction)
+        # Clock the installed rod frame to the future hinge's local reference. This makes
         # angle=0 reproduce the cutting pose even for an arbitrarily rotated rest.
-        rod_joint = RigidJoint(self.rod_joint.label, leg, rest.location * hinge.relative_axis.location)
+        rod_joint = RigidJoint(self.rod_joint.label, leg, rest.location * local_axis.location)
         return HingeLegInstallation(
             rest=rest, leg=leg, tool=tool, housing=self._housing.moved(placement),
             joint_label=joint_label, rod_joint=rod_joint, angle=self._angle,
+            local_axis=local_axis, angular_range=self._angular_range,
         )
 
 

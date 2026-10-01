@@ -2,13 +2,13 @@
 
 from typing import Protocol
 
-from build123d import Compound, Part, RigidJoint, Solid
+from build123d import Compound, Location, Part, RigidJoint, Solid
 
 
 class LegInstallation(Protocol):
     """Independent installation result responsible for its own final attachment.
 
-    Each installation returns a new body, preserving existing attachment frames.
+    Each installation preserves the body's local modeling frame and placement.
     Complete every installation before calling attach_to with the final body.
     Joint types, attachment settings, and connection details belong to the
     implementation. Tools and guides remain snapshots at installation time.
@@ -37,9 +37,9 @@ class LegInstallation(Protocol):
     def attach_to(self, final_body: Part | Solid) -> None:
         """Attach this leg to the final body before nesting either in a scene.
 
-        Resolve any required frames on final_body, not the intermediate rest.
-        Position the leg and connect joints as needed without changing body
-        geometry. Attachment configuration is owned by the leg implementation.
+        Use the retained local installation frame and final_body's placement to
+        create attachment joints or position the leg without changing body
+        geometry. No attachment joint needs to survive the intermediate cuts.
         """
         ...
 
@@ -73,11 +73,14 @@ class Leg(Protocol):
         ...
 
     def install(
-        self, mount: RigidJoint, *, joint_label: str = "leg",
+        self, body: Part | Solid, *, at: Location, joint_label: str = "leg",
     ) -> LegInstallation:
-        """Return a new body and independent leg without modifying inputs.
+        """Install at a frame local to body and return an independent leg result.
 
-        Preserve existing joints. Use joint_label to distinguish this
-        installation's attachment data from other installations on the body.
+        Preserve the body's modeling frame and placement. Existing joints and
+        connections need not be carried through cuts. The body may be replaced
+        or modified; the caller transfers it for construction and final nesting.
+        Retain attachment data locally and create final joints in attach_to().
+        Use joint_label to distinguish attachments from other installations.
         """
         ...
