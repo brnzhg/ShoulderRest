@@ -4,6 +4,8 @@ from typing import Literal, Protocol
 
 from build123d import Compound, Location, RigidJoint, Solid, Vector, Wire
 
+from shoulder_rest.parts.shoulder import Shoulder
+
 
 class ViolinOutline(Protocol):
     """Local XY construction geometry, independent of how the outline is made.
@@ -11,6 +13,7 @@ class ViolinOutline(Protocol):
     All four open curves run from the lower-Y end to the upper-Y end. Curves
     and attachment points stay in this modeling frame even if the block moves.
     The block's placement maps that frame into an assembly.
+    Subclass this interface to inherit positioning against a Shoulder.
     """
 
     @property
@@ -35,13 +38,23 @@ class ViolinOutline(Protocol):
 
     @property
     def block(self) -> Solid:
-        """Positionable visualization solid with a 'shoulder' rigid joint."""
+        """Positionable visualization solid carrying the shared mount."""
         ...
 
     @property
-    def shoulder_joint(self) -> RigidJoint:
-        """Shared attachment joint on the positionable violin block."""
+    def mount_joint(self) -> RigidJoint:
+        """Shared frame used to position the violin on a shoulder and fit a rest."""
         ...
+
+    def position_on(self, shoulder: Shoulder) -> None:
+        """Move the violin to the shoulder's violin placement before scene nesting.
+
+        Placement is applied once; call again after moving the shoulder.
+        Construction curves remain in their local modeling frame.
+        """
+        if self.block.parent is not None or shoulder.assembly.parent is not None:
+            raise ValueError("Position the violin and shoulder before nesting them in a scene")
+        shoulder.violin_joint.connect_to(self.mount_joint)
 
     @property
     def mount_location(self) -> Location:

@@ -6,7 +6,7 @@
 - `left_mount_joint`, `right_mount_joint`: rigid installation joints registered on `part`. Mount X follows the rod; mount Z points into the material.
 - `violin_joint`: a rigid joint registered on the same `part`, defining its violin attachment, including any spacing and tilt.
 
-The three joints must be distinct and belong to the final body, including after Boolean operations. Implementations choose their labels; `Rest` reads local frames directly from the typed properties before installation. `Rest` passes distinct installation labels (`left_leg` and `right_leg`) to the leg implementations; those implementations own any attachment joints and resolve label conflicts. A geometry implementation can satisfy the protocol structurally; it need not inherit from `Rest` or `RestGeometry`.
+The three joints must be distinct and belong to the final body, including after Boolean operations. Implementations choose their labels; `Rest` reads local frames directly from the typed properties before installation. `Rest` passes distinct installation labels (`left_leg` and `right_leg`) to the leg implementations; those implementations own any attachment joints and resolve label conflicts. Implementations can subclass `RestGeometry` or satisfy the protocol structurally by supplying its four properties.
 
 `SimpleRestGeometry` in `parts/simple_rest.py` builds an inspectable rounded blank and its joints, without a leg dependency. `Rest(geometry, leg, right_leg=None)` consumes that interface. The supplied template is used independently for both sides unless a separate `right_leg` is supplied. Attachment settings such as angles and limits belong to the leg implementation.
 
@@ -32,7 +32,7 @@ The completed `assembly` is a persistent Compound containing the final `part` an
 
 Typed joint properties retain references created after the final cut. Later placement updates the existing joints through their owning parts.
 
-`position_on(violin)` is available for subsequent alignment to a violin. Call it before nesting the rest and violin in a scene; it can be repeated while they remain top-level. Connections do not continuously track later violin movement. Move the whole assembly to keep its children together.
+Use `violin.position_on(shoulder)` to establish the violin pose and `rest.position_on(violin)` to align the completed rest. Any fitting needed before leg installation belongs inside the concrete geometry implementation. The placement methods connect the matching joints internally and move only their receiver. Call them before scene nesting; they can be repeated while the parts remain top-level. Connections do not continuously track later movement. Move the whole rest assembly to keep its children together.
 
 `left_mount_joint` and `right_mount_joint` belong to the printable body child. Their build123d locations are in rest assembly coordinates; apply the assembly's global placement for world coordinates. `installations` retains cutting tools and housing guides as construction snapshots; its `rest` fields refer to the respective intermediate cut results. Use `rest.part` for the final body.
 

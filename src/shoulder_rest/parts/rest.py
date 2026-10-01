@@ -101,7 +101,7 @@ class Rest:
         """
         if self._assembly.parent is not None or violin.block.parent is not None:
             raise ValueError("Position the rest and violin before nesting them in a scene")
-        violin.shoulder_joint.connect_to(self.violin_joint)
+        violin.mount_joint.connect_to(self.violin_joint)
 
 
 if __name__ == "__main__":
@@ -123,11 +123,10 @@ if __name__ == "__main__":
             Location((0, 5, 20), (0, -26, 0))
         )
     )
-    shoulder.violin_joint.connect_to(violin.shoulder_joint)
+    violin.position_on(shoulder)
     geometry = SimpleRestGeometry(violin)
-    violin.shoulder_joint.connect_to(geometry.violin_joint)
-    # A contouring implementation can finish its body in this pose before assembly.
     rest = Rest(geometry, build_hinge_leg())
+    rest.position_on(violin)
     assembly = Compound(label="Rest fitting example", children=[
         shoulder.assembly, violin.block, rest.assembly,
     ])

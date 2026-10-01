@@ -28,7 +28,8 @@ uv run python -m shoulder_rest.parts.rest
 - `left` and `right`: violin outline curves.
 - `left_attachment` and `right_attachment`: inward-offset curves for leg centers.
 - `attachment_point(side, fraction)`: a point at a fraction of a curve's arc length, from its lower-Y end (0) to its upper-Y end (1).
-- `block`: a positionable violin visualization; `shoulder_joint: RigidJoint` exposes its shared attachment.
+- `block`: a positionable violin visualization.
+- `position_on(shoulder)`: places the block at the shoulder's violin attachment.
 - `mount_location`: the shared attachment frame at the midpoint of the outline's top (upper-Y) closing line, on Z=0.
 - `add_mount_joint(rest, offset=...)`: adds a rigid joint named `violin` to a rest built in the outline's local frame.
 
@@ -51,7 +52,7 @@ The curves stay in local XY even when the block moves. The block and rest share 
 
 ### Shoulder: contact geometry and violin placement
 
-`Shoulder` supplies `reference` geometry for inspection, an `extended` cutting tool for shaping the contact surface, and an `assembly` containing the reference cast for display. Its `violin_joint` positions the violin relative to the shoulder.
+`Shoulder` supplies `reference` geometry for inspection, an `extended` cutting tool for shaping the contact surface, and an `assembly` containing the reference cast for display. Its implementation defines where the violin sits; call `violin.position_on(shoulder)` to apply that placement.
 
 Position the shoulder assembly before retrieving `reference` or `extended`: each is an independent snapshot at the current world placement. Use the extended shape in a Boolean cut after placing the rest in the same frame.
 
@@ -61,11 +62,11 @@ Position the violin against the shoulder, then position the complete rest:
 
 ```python
 # rest is constructed from a RestGeometry and a leg template.
-shoulder.violin_joint.connect_to(violin.shoulder_joint)
+violin.position_on(shoulder)
 rest.position_on(violin)
 ```
 
-The rest's `violin_joint` belongs to its whole assembly, so the body and both legs move together. A +12 mm local Z offset in that joint places the rest 12 mm toward -Z relative to the violin. The joint can also connect directly to `shoulder.violin_joint`.
+Positioning a completed rest moves its body and both legs together. The rest geometry defines its spacing and tilt relative to the violin.
 
 ### Leg: installation and final attachment
 
@@ -79,7 +80,7 @@ Configure attachment settings on the chosen leg implementation. For example, `bu
 
 ### Rest: shared behavior and body implementations
 
-`RestGeometry` supplies a finished body and three typed rigid joints on that body: `left_mount_joint`, `right_mount_joint`, and `violin_joint`. A geometry implementation may position the shoulder and violin and cut the contact contour before exposing that result. `Rest(geometry, leg)` reads those joints' local frames directly, installs both legs, and creates the completed assembly. It does not copy the geometry or look up its joints by label. Supplying the geometry transfers its body for construction and nesting; a leg implementation may modify or replace it.
+`RestGeometry` supplies a finished body and three typed rigid joints on that body: `left_mount_joint`, `right_mount_joint`, and `violin_joint`. Concrete geometry implementations handle any positioning and shoulder contouring needed during construction. `Rest(geometry, leg)` installs both legs and creates the completed assembly at the body's pose. Supplying the geometry transfers its body for construction and nesting; a leg implementation may modify or replace it.
 
 ```python
 from shoulder_rest.parts.leg.hinge_leg import build_hinge_leg
@@ -89,7 +90,6 @@ from shoulder_rest.parts.violin_outline.spline_violin_outline import build_violi
 
 violin = build_violin_outline()
 geometry = SimpleRestGeometry(violin, SimpleRestParameters(width=44, thickness=12))
-# Inspect geometry.part or position it through geometry.violin_joint here.
 rest = Rest(
     geometry, build_hinge_leg(angle=15),
     right_leg=build_hinge_leg(angle=-10),
@@ -98,9 +98,11 @@ rest.position_on(violin)
 assembly = rest.assembly
 ```
 
-`assembly` is a persistent property, ready for display or nesting. `part` is its printable body child. `violin_joint` positions the whole assembly; typed `left_mount_joint` and `right_mount_joint` expose the geometry's installation frames. `installations` holds the two installation results for inspecting their leg assemblies, tools, and housing guides. Omitting `right_leg` uses the supplied template independently for both sides; providing it allows different settings or attachment mechanisms.
+`assembly` is ready for display or nesting; `part` is its printable body child. Omitting `right_leg` uses the supplied template independently for both sides; providing it allows different settings or attachment mechanisms.
 
-If the geometry is already fitted to the shoulder and violin, its placement carries into `Rest` without another positioning step. Otherwise, position the violin first and call `rest.position_on(violin)` before nesting them in a scene. You can call it again after moving the violin; joint connections perform placement once rather than continuously updating it. Move `rest.assembly` to move the rest independently, keeping its children together.
+If the geometry is already fitted to the shoulder and violin, its placement carries into `Rest` without another positioning step. Otherwise, position the violin first and call `rest.position_on(violin)`. All `position_on` methods move their receiver once, before scene nesting; call them again when their reference moves. Move `rest.assembly` to move the rest independently, keeping its children together.
+
+Custom outlines can subclass `ViolinOutline` to inherit `position_on(shoulder)`. Custom rest geometry only needs to provide the body and three attachment properties, either by subclassing `RestGeometry` or satisfying it structurally. `Rest` provides placement of the completed assembly.
 
 `SimpleRestGeometry` builds a flat rounded bar without a shoulder contact cut. Change `SimpleRestParameters` for dimensions and attachment fractions, or implement `RestGeometry` for a different body and contouring workflow. `build_simple_rest(violin, leg, parameters)` is a convenience factory for the rounded geometry and assembled rest. The [rest spec](specs/rest_spec.md) describes geometry ownership and coordinate conventions. Preview the complete fitting scene with `uv run python -m shoulder_rest.parts.rest`.
 
@@ -108,8 +110,8 @@ If the geometry is already fitted to the shoulder and violin, its placement carr
 
 - `src/shoulder_rest/parts/`: reusable models. Each of `leg/`, `shoulder/`, and `violin_outline/` contains a same-named interface module and a separate implementation (`hinge_leg.py`, `step_shoulder.py`, or `spline_violin_outline.py`). Package imports expose the interfaces; factories and parameters live with their implementations. Shared Kun geometry remains in `parts/kun.py`.
 - `src/shoulder_rest/assets/`: input geometry bundled with the package.
-- `assets/`: reference material, including STEP solids used by tests.
-- `tests/`: geometry and interface checks; run `uv run python -m unittest discover -s tests`.
+- `assets/`: reference material, including original STEP solids.
+- `tests/`: two assembly workflow smoke checks; run `uv run python -m unittest discover -s tests`. Use the CAD previews to inspect evolving geometry.
 - `specs/`: feature geometry, frame conventions, and implementation details.
 - `exports/`: generated STEP/STL files, ignored by Git.
 - `changelog/`: optional change history.

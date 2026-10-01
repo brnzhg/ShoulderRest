@@ -17,7 +17,7 @@ class SplineViolinOutline(ViolinOutline):
     Dimensions are in mm. Points must have positive X and strictly increasing Y.
     ``attachment_offset`` is a normal inward distance, not an X translation.
     The original curves and horizontal end caps enclose the block footprint;
-    the block extends from Z=0 to ``block_thickness``. Its shoulder joint is at
+    the block extends from Z=0 to ``block_thickness``. Its shared mount is at
     the upper-Y closing line's midpoint on Z=0, with the local XYZ axes.
     Curves are returned as copies.
     """
@@ -60,7 +60,7 @@ class SplineViolinOutline(ViolinOutline):
             extrude(footprint, amount=block_thickness, dir=(0, 0, 1))
         self._block = block.solid()
         self._block.label = "Violin block"
-        self._shoulder_joint = self.add_mount_joint(self._block, label="shoulder")
+        self._mount_joint = self.add_mount_joint(self._block, label="mount")
 
     def _inward_curve(self, distance: float, footprint: Face) -> Wire:
         if distance == 0:
@@ -109,8 +109,8 @@ class SplineViolinOutline(ViolinOutline):
         return self._block
 
     @property
-    def shoulder_joint(self) -> RigidJoint:
-        return self._shoulder_joint
+    def mount_joint(self) -> RigidJoint:
+        return self._mount_joint
 
     @property
     def mount_location(self) -> Location:
@@ -174,7 +174,7 @@ if __name__ == "__main__":
         violin.left_attachment,
         violin.right_attachment,
         guide,
-        violin.shoulder_joint.symbol,
+        violin.mount_joint.symbol,
         names=[
             "Violin block", "Left outline", "Right outline",
             "Left attachment", "Right attachment", "Example rest guide", "Mount frame",
