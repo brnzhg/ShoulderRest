@@ -4,9 +4,9 @@ import unittest
 
 from build123d import Box, Location, Polyline, RigidJoint, Vector
 
-from shoulder_rest.parts.violin_outline import (
+from shoulder_rest.parts.violin_outline import ViolinOutline
+from shoulder_rest.parts.violin_outline.spline_violin_outline import (
     SplineViolinOutline,
-    ViolinOutline,
     build_violin_outline,
 )
 
@@ -59,6 +59,8 @@ class ViolinOutlineTests(unittest.TestCase):
         for t in (0, 0.25, 0.5, 0.75, 1):
             self.assert_vector(half.right @ t, half.right_attachment @ t)
         self.assertIsInstance(block.joints["shoulder"], RigidJoint)
+        self.assertIs(self.violin.shoulder_joint, block.joints["shoulder"])
+        self.assertIs(self.violin.shoulder_joint.parent, block)
         self.assertEqual(block.joints["shoulder"].location, self.violin.mount_location)
 
     def test_polyline_endpoints_follow_parameter_changes(self) -> None:
@@ -78,7 +80,7 @@ class ViolinOutlineTests(unittest.TestCase):
         placement = Location((10, 20, 30), (20, 30, 40))
         violin.block.locate(placement)
         self.assertEqual(
-            violin.block.joints["shoulder"].location, placement * violin.mount_location
+            violin.shoulder_joint.location, placement * violin.mount_location
         )
         self.assert_vector(violin.attachment_point("left", 0.4), point)
         curve = violin.left_attachment
@@ -115,13 +117,13 @@ class ViolinOutlineTests(unittest.TestCase):
         shoulder_joint = RigidJoint(
             "violin", shoulder, Location((40, -30, 70), (20, -30, 40))
         )
-        shoulder_joint.connect_to(violin.block.joints["shoulder"])
-        self.assertEqual(violin.block.joints["shoulder"].location, shoulder_joint.location)
+        shoulder_joint.connect_to(violin.shoulder_joint)
+        self.assertEqual(violin.shoulder_joint.location, shoulder_joint.location)
         for height in (0, 12):
             with self.subTest(height=height):
                 rest = Box(20, 30, 5)
                 joint = violin.add_mount_joint(rest, offset=Location((0, 0, height)))
-                violin.block.joints["shoulder"].connect_to(joint)
+                violin.shoulder_joint.connect_to(joint)
                 self.assertEqual(joint.location, shoulder_joint.location)
                 self.assertEqual(
                     rest.location, violin.block.location * Location((0, 0, -height))

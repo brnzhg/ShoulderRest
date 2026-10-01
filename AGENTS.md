@@ -7,6 +7,7 @@ This is a Python CAD project using build123d, managed by uv. Read [README.md](RE
 - Prioritize readability. Compose recognizable shapes, use symmetry, and name dimensions by their role. Use coordinate-heavy outlines only when the geometry needs them.
 - Use `BuildLine`, `BuildSketch`, and `BuildPart` where appropriate for procedural construction. Use direct shape operations for placement and joint connections.
 - Keep reusable geometry helpers isolated with private builders. Return local geometry for explicit insertion, without inheriting a caller's placement or modifying its active builder.
+- Keep each part interface in its same-named subpackage/module (for example, `parts/leg/leg.py`), and concrete geometry in a separate implementation module (such as `hinge_leg.py`). Package `__init__.py` files expose interfaces only.
 - Keep parts modular and parameterizable. Rest implementations should consume the interfaces without knowing how geometry is constructed or loaded.
 - Express dimensions in millimeters and angles in degrees. Document coordinate frames and offsets at interface boundaries.
 - Add tags only for a concrete downstream use. Prefer capturing geometry during construction when that simplifies later selection; avoid speculative face-classification code.

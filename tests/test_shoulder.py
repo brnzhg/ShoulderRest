@@ -6,7 +6,8 @@ import unittest
 
 from build123d import Box, Compound, Location, RigidJoint, export_step
 
-from shoulder_rest.parts.shoulder import Shoulder, StepShoulder
+from shoulder_rest.parts.shoulder import Shoulder
+from shoulder_rest.parts.shoulder.step_shoulder import StepShoulder
 
 
 class ShoulderTests(unittest.TestCase):

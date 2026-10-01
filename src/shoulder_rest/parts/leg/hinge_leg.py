@@ -7,7 +7,6 @@ the screw runs along Z. Lengths are in millimeters and angles in degrees.
 from copy import deepcopy
 from dataclasses import dataclass, fields
 from math import isfinite, radians, sqrt, tan
-from typing import Protocol, cast
 
 from build123d import (
     Align, Axis, Box, BuildPart, BuildSketch, Color, Compound, Cylinder,
@@ -17,63 +16,7 @@ from build123d import (
 )
 
 from shoulder_rest.parts.kun import KunParameters, nut_slot_face, screw_hole_face
-
-@dataclass(frozen=True)
-class LegInstallation:
-    """Independent results of one installation; connect the leg after all cuts.
-
-    Use the *latest* rest's joints[joint_label] for final assembly. A subsequent
-    installation returns another rest, carrying forward all existing joints.
-    leg is the full assembly (printed body and metal rod).
-    tool and housing are fixed snapshots of the installed, zero-angle cavity.
-    """
-
-    rest: Part | Solid
-    leg: Compound
-    tool: Part
-    housing: Part
-    joint_label: str
-
-    @property
-    def rod_joint(self) -> RigidJoint:
-        """Connect the final rest's hinge joint to this installed leg."""
-        return cast(RigidJoint, self.leg.joints["rod"])
-
-
-class Leg(Protocol):
-    """Geometry and installation interface for a shoulder-rest implementation."""
-
-    @property
-    def part(self) -> Part:
-        """Printable child for export; position the whole assembly for modeling."""
-        ...
-
-    @property
-    def assembly(self) -> Compound:
-        """Printable leg and metal rod; position and connect this assembly."""
-        ...
-
-    @property
-    def tool(self) -> Part:
-        """Cavity tool snapshot at the template assembly's current placement."""
-        ...
-
-    @property
-    def housing(self) -> Part:
-        """Required surrounding material guide; never automatically added to a rest."""
-        ...
-
-    @property
-    def mount_joint(self) -> RigidJoint:
-        """Installation reference at the center of the nut-seat edge."""
-        ...
-
-    def install(
-        self, mount: RigidJoint, *, joint_label: str = "leg",
-        angular_range: tuple[float, float] = (-180, 180),
-    ) -> LegInstallation:
-        """Cut mount.parent and return the new rest, hinge, leg and guide snapshots."""
-        ...
+from .leg import Leg
 
 
 @dataclass(frozen=True)
@@ -223,9 +166,24 @@ class HingeLegPart(Part):
             raise ValueError("Dimensions did not produce a single valid leg housing")
         super().__init__(body.part_local.wrapped, label="Hinge slot leg")
 
-        RigidJoint("rod", self, Location(Plane(origin=(0, 0, 0), z_dir=(1, 0, 0))))
-        RigidJoint("screw", self, Location((0, p.screw_y, -p.rod_half)))
-        RigidJoint("nut", self, Location((0, p.screw_y, p.rod_half)))
+        self._rod_joint = RigidJoint("rod", self, Location(Plane(origin=(0, 0, 0), z_dir=(1, 0, 0))))
+        self._screw_joint = RigidJoint("screw", self, Location((0, p.screw_y, -p.rod_half)))
+        self._nut_joint = RigidJoint("nut", self, Location((0, p.screw_y, p.rod_half)))
+
+    @property
+    def rod_joint(self) -> RigidJoint:
+        """Rod axis on the printable child; use assembly joints for placement."""
+        return self._rod_joint
+
+    @property
+    def screw_joint(self) -> RigidJoint:
+        """Screw entry on the printable child."""
+        return self._screw_joint
+
+    @property
+    def nut_joint(self) -> RigidJoint:
+        """Nut seat on the printable child."""
+        return self._nut_joint
 
 
 @dataclass(frozen=True)
@@ -348,6 +306,28 @@ def _housing_guide(p: LegParameters, c: CavityParameters, tool: Part) -> Part:
     return guide.part_local
 
 
+@dataclass(frozen=True)
+class HingeLegInstallation:
+    """Hinge-specific result; captures the configured final angle in degrees."""
+
+    rest: Part | Solid
+    leg: Compound
+    tool: Part
+    housing: Part
+    joint_label: str
+    rod_joint: RigidJoint
+    angle: float
+
+    def attach_to(self, final_body: Part | Solid) -> None:
+        """Resolve the hinge after all cuts and connect the installed rod."""
+        if final_body.parent is not None or final_body.children or self.leg.parent is not None:
+            raise ValueError("Attach the leg before nesting the body or leg in an assembly")
+        hinge = final_body.joints.get(self.joint_label)
+        if not isinstance(hinge, RevoluteJoint) or hinge.parent is not final_body:
+            raise ValueError(f"Final body must contain the installed hinge {self.joint_label!r}")
+        hinge.connect_to(self.rod_joint, angle=self.angle)
+
+
 class HingeLeg(Leg):
     """Reusable leg template, cutter and housing guide sharing one source frame.
 
@@ -360,7 +340,14 @@ class HingeLeg(Leg):
     def __init__(
         self, parameters: LegParameters = LegParameters(),
         cavity: CavityParameters = CavityParameters(),
+        *, angle: float = 0, angular_range: tuple[float, float] = (-180, 180),
     ) -> None:
+        if not all(isfinite(a) for a in angular_range) or not angular_range[0] <= 0 <= angular_range[1]:
+            raise ValueError("Angular range must be finite and include the neutral angle (0)")
+        if not isfinite(angle) or not angular_range[0] <= angle <= angular_range[1]:
+            raise ValueError("Hinge angle must be finite and within the angular range")
+        self._angle = angle
+        self._angular_range = angular_range
         self._part = HingeLegPart(parameters)
         self._tool = _cavity_tool(parameters, cavity)
         self._housing = _housing_guide(parameters, cavity, self._tool)
@@ -371,9 +358,16 @@ class HingeLeg(Leg):
         self._rod.label = "Metal hinge rod"
         self._rod.color = Color("silver")
         self._assembly = Compound(label="Hinge leg assembly", children=[self._part, self._rod])
-        for name, joint in self._part.joints.items():
-            RigidJoint(name, self._assembly, joint.location)
-        RigidJoint("mount", self._assembly, Location(Plane(
+        self._rod_joint = RigidJoint(
+            self._part.rod_joint.label, self._assembly, self._part.rod_joint.location,
+        )
+        self._screw_joint = RigidJoint(
+            self._part.screw_joint.label, self._assembly, self._part.screw_joint.location,
+        )
+        self._nut_joint = RigidJoint(
+            self._part.nut_joint.label, self._assembly, self._part.nut_joint.location,
+        )
+        self._mount_joint = RigidJoint("mount", self._assembly, Location(Plane(
             origin=(0, parameters.screw_y, parameters.rod_half),
             x_dir=(1, 0, 0), z_dir=(0, 0, -1),
         )))
@@ -401,12 +395,26 @@ class HingeLeg(Leg):
 
     @property
     def mount_joint(self) -> RigidJoint:
-        return cast(RigidJoint, self._assembly.joints["mount"])
+        return self._mount_joint
+
+    @property
+    def rod_joint(self) -> RigidJoint:
+        """Rod attachment on the complete template assembly."""
+        return self._rod_joint
+
+    @property
+    def screw_joint(self) -> RigidJoint:
+        """Screw entry on the complete template assembly."""
+        return self._screw_joint
+
+    @property
+    def nut_joint(self) -> RigidJoint:
+        """Nut seat on the complete template assembly."""
+        return self._nut_joint
 
     def install(
         self, mount: RigidJoint, *, joint_label: str = "leg",
-        angular_range: tuple[float, float] = (-180, 180),
-    ) -> LegInstallation:
+    ) -> HingeLegInstallation:
         source = mount.parent
         if not isinstance(source, (Part, Solid)) or source.parent is not None or source.children:
             raise ValueError("Install on an un-nested Part or Solid before assembly")
@@ -416,8 +424,6 @@ class HingeLeg(Leg):
             raise ValueError("Choose a new, nonempty hinge joint label")
         if any(j.connected_to is not None for j in source.joints.values()):
             raise ValueError("Install legs before connecting the rest's assembly joints")
-        if not all(isfinite(a) for a in angular_range) or not angular_range[0] <= 0 <= angular_range[1]:
-            raise ValueError("Angular range must be finite and include the neutral angle (0)")
 
         placement = mount.location * self.mount_joint.relative_location.inverse()
         tool = self._tool.moved(placement)
@@ -433,19 +439,23 @@ class HingeLeg(Leg):
 
         leg = deepcopy(self._assembly).locate(placement)
         rod_axis = Axis(placement.position, placement.x_axis.direction)
-        hinge = RevoluteJoint(joint_label, rest, rod_axis, angular_range=angular_range)
+        hinge = RevoluteJoint(joint_label, rest, rod_axis, angular_range=self._angular_range)
         # Clock the installed rod frame to this hinge's reference. This makes
         # angle=0 reproduce the cutting pose even for an arbitrarily rotated rest.
-        RigidJoint("rod", leg, rest.location * hinge.relative_axis.location)
-        return LegInstallation(rest, leg, tool, self._housing.moved(placement), joint_label)
+        rod_joint = RigidJoint(self.rod_joint.label, leg, rest.location * hinge.relative_axis.location)
+        return HingeLegInstallation(
+            rest=rest, leg=leg, tool=tool, housing=self._housing.moved(placement),
+            joint_label=joint_label, rod_joint=rod_joint, angle=self._angle,
+        )
 
 
 def build_hinge_leg(
     parameters: LegParameters = LegParameters(),
     cavity: CavityParameters = CavityParameters(),
+    *, angle: float = 0, angular_range: tuple[float, float] = (-180, 180),
 ) -> HingeLeg:
-    """Build a reusable leg, cavity tool and material guide."""
-    return HingeLeg(parameters, cavity)
+    """Build a hinge template with its final attachment angle and limits in degrees."""
+    return HingeLeg(parameters, cavity, angle=angle, angular_range=angular_range)
 
 
 if __name__ == "__main__":
