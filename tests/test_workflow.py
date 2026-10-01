@@ -2,8 +2,9 @@
 
 import unittest
 
-from build123d import Compound, Location
+from build123d import Compound, Location, Pos, Rotation
 
+from shoulder_rest.parts.contoured_rest import ContouredRestGeometry, ContouredRestParameters
 from shoulder_rest.parts.leg.hinge_leg import build_hinge_leg
 from shoulder_rest.parts.rest import Rest
 from shoulder_rest.parts.shoulder.step_shoulder import load_shoulder_cast
@@ -12,6 +13,36 @@ from shoulder_rest.parts.violin_outline.spline_violin_outline import build_violi
 
 
 class WorkflowTests(unittest.TestCase):
+    def test_contour_and_assemble_at_shoulder_pose(self) -> None:
+        shoulder = load_shoulder_cast(
+            cast_location=Location((0, 0, 0), (30, 30, -5)),
+            violin_location=(
+                Pos(-55, -87.5, 57.5) * Rotation(0, 0, 66) * Rotation(8, 0, 0)
+                * Location((18, 2, 24), (0, -24, 0))
+            ),
+        )
+        for parameters, pose in (
+            (ContouredRestParameters(), Location()),
+            (ContouredRestParameters(width=34, contact_depth=65,
+                                     left_fraction=0.35, right_fraction=0.45),
+             Location((20, -30, 40), (10, 20, 30))),
+        ):
+            with self.subTest(parameters=parameters):
+                shoulder.assembly.locate(pose)
+                violin = build_violin_outline()
+                geometry = ContouredRestGeometry(violin, shoulder, parameters)
+                self.assertTrue(geometry.part.is_valid)
+                self.assertEqual(len(geometry.part.solids()), 1)
+                self.assertLess((geometry.part & shoulder.extended).volume, 1e-5)
+                # In this fit the cutter reaches the whole oversized bottom face.
+                local_body = geometry.part.moved(geometry.part.location.inverse())
+                self.assertGreater(local_body.bounding_box().min.Z,
+                                   -parameters.contact_depth + 1)
+                rest = Rest(geometry, build_hinge_leg())
+                self.assertEqual(rest.violin_joint.location, violin.mount_joint.location)
+                self.assertTrue(rest.assembly.is_valid)
+                self.assertEqual(len(rest.part.solids()), 1)
+
     def test_assemble_rest_and_fit_to_shoulder(self) -> None:
         shoulder = load_shoulder_cast(
             cast_location=Location((0, 0, 0), (30, 30, -5)),

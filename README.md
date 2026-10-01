@@ -1,6 +1,6 @@
 # Shoulder Rest
 
-Parametric build123d models for a 3D-printed violin shoulder rest. The `Shoulder`, `ViolinOutline`, and `Leg` interfaces provide geometry and attachment frames for a rest implementation. `Rest` handles leg installation and assembly, with a simple rounded bar as a starting body. An approximately S-shaped bar with a shoulder contact contour is planned. Dimensions are in millimeters; angles are in degrees.
+Parametric build123d models for a 3D-printed violin shoulder rest. The `Shoulder`, `ViolinOutline`, and `Leg` interfaces provide geometry and attachment frames for a rest implementation. `Rest` handles leg installation and assembly, with flat and shoulder-contoured rounded bars as starting bodies. Dimensions are in millimeters; angles are in degrees.
 
 ## Setup and previews
 
@@ -17,6 +17,7 @@ uv run python -m shoulder_rest.parts.shoulder.step_shoulder
 uv run python -m shoulder_rest.parts.violin_outline.spline_violin_outline
 uv run python -m shoulder_rest.parts.leg.hinge_leg
 uv run python -m shoulder_rest.parts.rest
+uv run python -m shoulder_rest.parts.contoured_rest
 ```
 
 ## Interfaces for building a rest
@@ -106,12 +107,27 @@ Custom outlines can subclass `ViolinOutline` to inherit `position_on(shoulder)`.
 
 `SimpleRestGeometry` builds a flat rounded bar without a shoulder contact cut. Change `SimpleRestParameters` for dimensions and attachment fractions, or implement `RestGeometry` for a different body and contouring workflow. `build_simple_rest(violin, leg, parameters)` is a convenience factory for the rounded geometry and assembled rest. The [rest spec](specs/rest_spec.md) describes geometry ownership and coordinate conventions. Preview the complete fitting scene with `uv run python -m shoulder_rest.parts.rest`.
 
+`ContouredRestGeometry` demonstrates fitting during construction. It positions the violin on the supplied shoulder, extends the right half of a rounded bar to an oversized depth, and subtracts `shoulder.extended`. It defines the joints on the finished body at its fitted pose:
+
+```python
+from shoulder_rest.parts.contoured_rest import ContouredRestGeometry, ContouredRestParameters
+
+# shoulder defines the violin placement; violin is an un-nested outline.
+geometry = ContouredRestGeometry(
+    violin, shoulder, ContouredRestParameters(contact_depth=80),
+)
+rest = Rest(geometry, build_hinge_leg())
+# Already fitted: display rest.assembly with shoulder.assembly and violin.block.
+```
+
+The other half stays at the base bar thickness. `contact_side="left"` selects the opposite half; `contact_depth` is the total blank depth below the leg mounting face, in mm. Width, thickness, attachment fractions, and violin gap use the same parameters as the simple bar. Adjust the shoulder's violin placement to change the fit, then rebuild the geometry and rest. Preview the example with `uv run python -m shoulder_rest.parts.contoured_rest`.
+
 ## Repository layout
 
 - `src/shoulder_rest/parts/`: reusable models. Each of `leg/`, `shoulder/`, and `violin_outline/` contains a same-named interface module and a separate implementation (`hinge_leg.py`, `step_shoulder.py`, or `spline_violin_outline.py`). Package imports expose the interfaces; factories and parameters live with their implementations. Shared Kun geometry remains in `parts/kun.py`.
 - `src/shoulder_rest/assets/`: input geometry bundled with the package.
 - `assets/`: reference material, including original STEP solids.
-- `tests/`: two assembly workflow smoke checks; run `uv run python -m unittest discover -s tests`. Use the CAD previews to inspect evolving geometry.
+- `tests/`: assembly and contouring workflow smoke checks; run `uv run python -m unittest discover -s tests`. Use the CAD previews to inspect evolving geometry.
 - `specs/`: feature geometry, frame conventions, and implementation details.
 - `exports/`: generated STEP/STL files, ignored by Git.
 - `changelog/`: optional change history.

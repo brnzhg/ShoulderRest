@@ -50,3 +50,15 @@ The default bar retains the bundled hinge legs' complete housing guides after cu
 The body has neither an S-shaped path nor a shoulder contact contour. The preview positions it relative to the bundled shoulder but does not fit the bar to the cast. For a contoured implementation, transform the positioned shoulder's `extended` cutter into the body's modeling frame and finish shaping before handing the finished geometry to `Rest`.
 
 Preview: `uv run python -m shoulder_rest.parts.rest`.
+
+## Half-bar shoulder contour
+
+`ContouredRestGeometry(violin, shoulder, parameters)` in `parts/contoured_rest.py` is a second implementation of the same four-property interface. It calls `violin.position_on(shoulder)` during construction, so both references must remain un-nested. No leg implementation is involved in shaping.
+
+`ContouredRestParameters` extends `SimpleRestParameters` with `contact_depth=80` mm and `contact_side="right"`. The whole slot footprint is extruded to the base thickness. A plane through the midpoint, perpendicular to the line between leg centers, divides the footprint into equal halves. The selected half is extruded from Z=0 to `-contact_depth` and united with the bar.
+
+The blank receives a violin joint through `violin.add_mount_joint(blank, offset=Location((0, 0, violin_gap)))`. Connecting `violin.mount_joint` to this joint establishes the fitted pose. A private `BuildPart(pose)` inserts the blank at the local origin and subtracts `shoulder.extended` transformed into that same local frame. The builder returns a fresh body at the fitted pose without the blank's joint metadata. All three joints are created on that final body. Passing it to `Rest` retains this fit without `rest.position_on(...)`.
+
+The cut must remove material and leave one valid solid. The example's right half is fully trimmed by the shoulder surface; other placements or dimensions can leave an untrimmed end or cut into the mounting region. Inspect the preview after changes. This is a contouring example, without padding allowance or automatic leg-housing protection. Rebuild after changing the fit; moving the assembled rest does not recompute its contour.
+
+Preview: `uv run python -m shoulder_rest.parts.contoured_rest`.
