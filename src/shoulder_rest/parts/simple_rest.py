@@ -18,10 +18,10 @@ from shoulder_rest.parts.violin_outline import ViolinOutline
 class SimpleRestParameters:
     """Millimeters, plus arc-length fractions selecting the two leg centers."""
 
-    width: float = 44
+    width: float = 30
     thickness: float = 12
-    left_fraction: float = 0.25
-    right_fraction: float = 0.60
+    left_fraction: float = 0.4
+    right_fraction: float = 0.4
     violin_gap: float = 12
 
     def __post_init__(self) -> None:
