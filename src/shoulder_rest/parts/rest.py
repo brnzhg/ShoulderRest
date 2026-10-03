@@ -1,6 +1,6 @@
 """Shared construction and placement for two-legged shoulder rests."""
 
-from build123d import Compound, Location, Part, RigidJoint, Solid
+from build123d import Compound, Location, Part, RigidJoint
 
 from shoulder_rest.parts.leg import Leg, LegInstallation
 from shoulder_rest.parts.rest_geometry import RestGeometry
@@ -42,9 +42,9 @@ class Rest:
         )
         right_template = leg if right_leg is None else right_leg
         right = right_template.install(
-            left.rest, at=right_frame, joint_label=_RIGHT_INSTALLATION_LABEL,
+            body, at=right_frame, joint_label=_RIGHT_INSTALLATION_LABEL,
         )
-        self._part = right.rest
+        self._part = body
         self._installations = (left, right)
         # Create the rest's public frames once, on the finished body.
         self._left_mount_joint = RigidJoint(
@@ -64,7 +64,7 @@ class Rest:
         )
 
     @property
-    def part(self) -> Part | Solid:
+    def part(self) -> Part:
         """Printable body child, with both leg cavities already cut."""
         return self._part
 
@@ -102,38 +102,3 @@ class Rest:
         if self._assembly.parent is not None or violin.block.parent is not None:
             raise ValueError("Position the rest and violin before nesting them in a scene")
         violin.mount_joint.connect_to(self.violin_joint)
-
-
-if __name__ == "__main__":
-    from build123d import Location, Rotation, Pos
-    from ocp_vscode import show
-
-    from shoulder_rest.parts.leg.hinge_leg import build_hinge_leg
-    from shoulder_rest.parts.shoulder.step_shoulder import load_shoulder_cast
-    from shoulder_rest.parts.simple_rest import SimpleRestGeometry, SimpleRestParameters
-    from shoulder_rest.parts.violin_outline.spline_violin_outline import build_violin_outline
-
-    violin = build_violin_outline()
-    
-    violin_level_correction = 8
-    violin_angle = 24
-    violin_roll_angle = 24
-    violin_position_offset = (18, 2, 24)
-    
-    shoulder = load_shoulder_cast(
-        cast_location=Location((0, 0, 0), (30, 30, -5)),
-        violin_location=(
-            Pos(-55, -87.5, 57.5) *
-            Rotation(0, 0, 90 - violin_angle) *
-            Rotation(violin_level_correction, 0, 0) *
-            Location(violin_position_offset, (0, -violin_roll_angle, 0))
-        )
-    )
-    violin.position_on(shoulder)
-    geometry = SimpleRestGeometry(violin, SimpleRestParameters(thickness=10, left_fraction=0.4, right_fraction=0.4, violin_gap=12))
-    rest = Rest(geometry, build_hinge_leg())
-    rest.position_on(violin)
-    assembly = Compound(label="Rest fitting example", children=[
-        shoulder.assembly, violin.block, rest.assembly,
-    ])
-    show(assembly)

@@ -106,3 +106,37 @@ def build_simple_rest(
         SimpleRestGeometry(violin, parameters), leg,
         right_leg=right_leg,
     )
+
+
+if __name__ == "__main__":
+    from build123d import Location, Rotation, Pos, Compound
+    from ocp_vscode import show
+
+    from shoulder_rest.parts.leg.hinge_leg import build_hinge_leg
+    from shoulder_rest.parts.shoulder.step_shoulder import load_shoulder_cast
+    from shoulder_rest.parts.violin_outline.spline_violin_outline import build_violin_outline
+
+    violin = build_violin_outline()
+    
+    violin_level_correction = 8
+    violin_angle = 24
+    violin_roll_angle = 24
+    violin_position_offset = (18, 2, 24)
+    
+    shoulder = load_shoulder_cast(
+        cast_location=Location((0, 0, 0), (30, 30, -5)),
+        violin_location=(
+            Pos(-55, -87.5, 57.5) *
+            Rotation(0, 0, 90 - violin_angle) *
+            Rotation(violin_level_correction, 0, 0) *
+            Location(violin_position_offset, (0, -violin_roll_angle, 0))
+        )
+    )
+    violin.position_on(shoulder)
+    geometry = SimpleRestGeometry(violin, SimpleRestParameters(thickness=10, left_fraction=0.4, right_fraction=0.4, violin_gap=12))
+    rest = Rest(geometry, build_hinge_leg())
+    rest.position_on(violin)
+    assembly = Compound(label="Rest fitting example", children=[
+        shoulder.assembly, violin.block, rest.assembly,
+    ])
+    show(assembly)

@@ -11,12 +11,12 @@ from math import isfinite, radians, sqrt, tan
 from build123d import (
     Align, Axis, Box, BuildPart, BuildSketch, Color, Compound, Cylinder,
     Face, Kind, Location, Locations, Mode, Part, Plane, Polygon,
-    Rectangle, RevoluteJoint, RigidJoint, Solid,
+    Rectangle, RevoluteJoint, RigidJoint,
     chamfer, extrude, fillet, insert, offset,
 )
 
 from shoulder_rest.parts.kun import KunParameters, nut_slot_face, screw_hole_face
-from .leg import Leg
+from .leg import Leg, LegInstallation
 
 
 @dataclass(frozen=True)
@@ -309,28 +309,30 @@ def _housing_guide(p: LegParameters, c: CavityParameters, tool: Part) -> Part:
 @dataclass(frozen=True)
 class HingeLegInstallation:
     """Hinge-specific result; captures the configured final angle in degrees."""
-
-    rest: Part | Solid
     leg: Compound
     tool: Part
     housing: Part
     joint_label: str
-    rod_joint: RigidJoint
+    rod_joint_label: str
     angle: float
-    local_axis: Axis
+    local_placement: Location
     angular_range: tuple[float, float]
 
-    def attach_to(self, final_body: Part | Solid) -> None:
+    def attach_to(self, final_body: Part) -> None:
         """Create the hinge on the finished body and connect the installed rod."""
         if final_body.parent is not None or final_body.children or self.leg.parent is not None:
             raise ValueError("Attach the leg before nesting the body or leg in an assembly")
         if self.joint_label in final_body.joints:
             raise ValueError(f"Final body already has a joint named {self.joint_label!r}")
+        placement = final_body.location * self.local_placement
         hinge = RevoluteJoint(
-            self.joint_label, final_body, self.local_axis.located(final_body.location),
+            self.joint_label, final_body, Axis.X.located(placement),
             angular_range=self.angular_range,
         )
-        hinge.connect_to(self.rod_joint, angle=self.angle)
+        # Use this hinge's actual zero frame; an axis alone does not retain roll.
+        self.leg.locate(placement)
+        rod_joint = RigidJoint(self.rod_joint_label, self.leg, hinge.location)
+        hinge.connect_to(rod_joint, angle=self.angle)
 
 
 class HingeLeg(Leg):
@@ -338,8 +340,9 @@ class HingeLeg(Leg):
 
     The mount uses the Onshape connector's origin, with explicit axes: X along
     the rod and Z toward the rest (-Z in the source frame). Connect/install
-    before nesting this leg assembly in the final assembly. Installation never
-    modifies inputs. Move assembly, not its individual hardware children.
+    before nesting this leg assembly in the final assembly. Installation cuts
+    the supplied body in place and copies the leg template. Move assembly, not
+    its individual hardware children.
     """
 
     def __init__(
@@ -418,36 +421,41 @@ class HingeLeg(Leg):
         return self._nut_joint
 
     def install(
-        self, body: Part | Solid, *, at: Location, joint_label: str = "leg",
+        self, body: Part, *, at: Location, joint_label: str = "leg",
     ) -> HingeLegInstallation:
-        source = body
-        if not isinstance(source, (Part, Solid)) or source.parent is not None or source.children:
-            raise ValueError("Install on an un-nested Part or Solid before assembly")
+        """Cut body in place and return it with an independent leg assembly."""
+        if not isinstance(body, Part) or body.parent is not None or body.children:
+            raise ValueError("Install on an un-nested Part before assembly")
         if not joint_label:
             raise ValueError("Choose a new, nonempty hinge joint label")
 
         local_placement = at * self.mount_joint.relative_location.inverse()
-        placement = source.location * local_placement
-        tool = self._tool.moved(placement)
-        # Work on geometry only; reference joints/connections are not construction data.
-        rest_placement = source.location
-        local_rest = Part(source.wrapped, label=source.label, color=source.color).located(Location())
-        local_tool = tool.moved(rest_placement.inverse())
-        rest = (local_rest - local_tool).moved(rest_placement)
+        placement = body.location * local_placement
+        # Cut in the body's modeling frame; the builder restores its placement.
+        with BuildPart(body.location, mode=Mode.PRIVATE) as installed:
+            with Locations(body.location.inverse()):
+                insert(body)
+            with Locations(local_placement):
+                insert(self._tool, mode=Mode.SUBTRACT)
+        rest = installed.part
+        assert rest is not None
         if not rest.is_valid or len(rest.solids()) != 1:
             raise ValueError("Installation must leave one valid connected rest solid")
-        if source.volume - rest.volume < 1e-7:
+        if body.volume - rest.volume < 1e-7:
             raise ValueError("Cavity tool does not intersect the rest")
 
-        leg = deepcopy(self._assembly).locate(placement)
-        local_axis = Axis(local_placement.position, local_placement.x_axis.direction)
-        # Clock the installed rod frame to the future hinge's local reference. This makes
-        # angle=0 reproduce the cutting pose even for an arbitrarily rotated rest.
-        rod_joint = RigidJoint(self.rod_joint.label, leg, rest.location * local_axis.location)
+        # Replace only the geometry, retaining the body's identity and attributes.
+        body.wrapped = rest.wrapped
+
         return HingeLegInstallation(
-            rest=rest, leg=leg, tool=tool, housing=self._housing.moved(placement),
-            joint_label=joint_label, rod_joint=rod_joint, angle=self._angle,
-            local_axis=local_axis, angular_range=self._angular_range,
+            leg=deepcopy(self._assembly).locate(placement),
+            tool=self._tool.moved(placement),
+            housing=self._housing.moved(placement),
+            joint_label=joint_label,
+            rod_joint_label=self.rod_joint.label,
+            angle=self._angle,
+            local_placement=local_placement,
+            angular_range=self._angular_range,
         )
 
 

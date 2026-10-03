@@ -75,13 +75,13 @@ Positioning a completed rest moves its body and both legs together. The rest geo
 
 The rigid installation mount defines the leg's position and orientation. Its Z direction points into the rest; for the hinge implementation, X follows the rod axis. Final attachment details belong entirely to the leg implementation.
 
-`leg.install(body, at=local_frame, joint_label=...)` returns a `LegInstallation`: the resulting body, independent leg assembly, tool and housing snapshots, and an `attach_to(final_body)` method. `Rest` installs both legs, passes the final body to each result's `attach_to()`, and nests the finished components. `at` is a `Location` in the body's local modeling frame, such as `geometry.left_mount_joint.relative_location`. Attachment joints are created on the final body. An implementation can use hinges, rigid joints, multiple joints, or direct placement.
+`leg.install(body, at=local_frame, joint_label=...)` modifies the supplied `Part` in place and returns a `LegInstallation`: an independent leg assembly, tool and housing snapshots, and an `attach_to(final_body)` method. `Rest` installs both legs, passes the final body to each result's `attach_to()`, and nests the finished components. `at` is a `Location` in the body's local modeling frame, such as `geometry.left_mount_joint.relative_location`. Attachment joints are created on the final body. An implementation can use hinges, rigid joints, multiple joints, or direct placement.
 
 Configure attachment settings on the chosen leg implementation. For example, `build_hinge_leg(angle=15, angular_range=(-30, 30))` selects its final hinge angle and limits in degrees. See the [leg spec](specs/leg_spec.md) for its attachment behavior and cavity geometry.
 
 ### Rest: shared behavior and body implementations
 
-`RestGeometry` supplies a finished body and three typed rigid joints on that body: `left_mount_joint`, `right_mount_joint`, and `violin_joint`. Concrete geometry implementations handle any positioning and shoulder contouring needed during construction. `Rest(geometry, leg)` installs both legs and creates the completed assembly at the body's pose. Supplying the geometry transfers its body for construction and nesting; a leg implementation may modify or replace it.
+`RestGeometry` supplies a finished `Part` containing one solid and three typed rigid joints on that body: `left_mount_joint`, `right_mount_joint`, and `violin_joint`. Concrete geometry implementations handle any positioning and shoulder contouring needed during construction. `Rest(geometry, leg)` installs both legs and creates the completed assembly at the body's pose. Supplying the geometry transfers its body for construction and nesting; leg implementations modify it in place.
 
 ```python
 from shoulder_rest.parts.leg.hinge_leg import build_hinge_leg

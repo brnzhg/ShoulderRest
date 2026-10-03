@@ -2,7 +2,7 @@
 
 `parts/rest_geometry.py` defines the `RestGeometry` protocol. Its four properties are:
 
-- `part`: a finished, un-nested, single-solid Part or Solid before leg cuts. Its location records the intended pose relative to the shoulder and violin.
+- `part`: a finished, un-nested, `Part` containing one solid before leg cuts. Its location records the intended pose relative to the shoulder and violin.
 - `left_mount_joint`, `right_mount_joint`: rigid installation joints registered on `part`. Mount X follows the rod; mount Z points into the material.
 - `violin_joint`: a rigid joint registered on the same `part`, defining its violin attachment, including any spacing and tilt.
 
@@ -22,11 +22,11 @@ body = (local_blank - local_tool).moved(pose)
 
 Alternatively, perform the Boolean in a common world frame and define joints in that same frame. The resulting part and its registered joints must describe the same placement. The geometry implementation can use those joints to position reference parts before handing the body to `Rest`. Construction does not rely on carrying those joints or connections through Boolean cuts.
 
-`Rest` snapshots the three `relative_location` frames and passes the original body to `leg.install(body, at=local_frame, joint_label=...)`. Each result supplies the body for the next installation, retaining the same modeling frame and placement. There is no defensive body copy, joint-dictionary lookup, or type cast in `Rest`.
+`Rest` snapshots the three `relative_location` frames and passes the original body to `leg.install(body, at=local_frame, joint_label=...)`. Both installations modify the same `Part`, retaining its modeling frame and placement. There is no defensive body copy, joint-dictionary lookup, or type cast in `Rest`.
 
 After both installations, `Rest` creates its public mount joints on the final body and calls both results' `attach_to(final_body)`. Each result uses retained local placement data to create its own attachment joints or directly position its leg. No attachment joint must survive an intermediate cut. `Rest` has no knowledge of those joint types or connection settings.
 
-Supplying a geometry transfers its body for construction and final assembly nesting. A leg implementation may modify it in place or return a new shape; callers should not rely on input immutability. The bundled hinge implementation uses Boolean results and leaves the input body unchanged, but this is not an orchestration requirement.
+Supplying a geometry transfers its body for construction and final assembly nesting. Leg implementations modify the supplied `Part` in place.
 
 The completed `assembly` is a persistent Compound containing the final `part` and both installed leg assemblies. Its typed `violin_joint` reproduces the geometry's violin frame on the **whole assembly**, preserving the initial fit. No additional placement step is needed when the geometry was already positioned.
 
@@ -34,7 +34,7 @@ Typed joint properties retain references created after the final cut. Later plac
 
 Use `violin.position_on(shoulder)` to establish the violin pose and `rest.position_on(violin)` to align the completed rest. Any fitting needed before leg installation belongs inside the concrete geometry implementation. The placement methods connect the matching joints internally and move only their receiver. Call them before scene nesting; they can be repeated while the parts remain top-level. Connections do not continuously track later movement. Move the whole rest assembly to keep its children together.
 
-`left_mount_joint` and `right_mount_joint` belong to the printable body child. Their build123d locations are in rest assembly coordinates; apply the assembly's global placement for world coordinates. `installations` retains cutting tools and housing guides as construction snapshots; its `rest` fields refer to the respective intermediate cut results. Use `rest.part` for the final body.
+`left_mount_joint` and `right_mount_joint` belong to the printable body child. Their build123d locations are in rest assembly coordinates; apply the assembly's global placement for world coordinates. `installations` retains cutting tools and housing guides as construction snapshots; use `rest.part` for the final body.
 
 ## Rounded bar geometry
 
