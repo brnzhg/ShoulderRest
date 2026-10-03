@@ -75,13 +75,13 @@ Positioning a completed rest moves its body and both legs together. The rest geo
 
 The rigid installation mount defines the leg's position and orientation. Its Z direction points into the rest; for the hinge implementation, X follows the rod axis. Final attachment details belong entirely to the leg implementation.
 
-`leg.install(body, at=local_frame, joint_label=...)` modifies the supplied `Part` in place and returns a `LegInstallation`: an independent leg assembly, tool and housing snapshots, and an `attach_to(final_body)` method. `Rest` installs both legs, passes the final body to each result's `attach_to()`, and nests the finished components. `at` is a `Location` in the body's local modeling frame, such as `geometry.left_mount_joint.relative_location`. Attachment joints are created on the final body. An implementation can use hinges, rigid joints, multiple joints, or direct placement.
+`Leg[InstallationT]` returns its concrete installation type from `install(body, at=local_frame, joint_label=...)`, modifying the supplied `Part` in place. The minimal `LegInstallation` protocol exposes the `body` and `local_placement` of the neutral leg source frame. `at` is a `Location` in the body's local modeling frame, such as `geometry.left_mount_joint.relative_location`. Concrete installations provide their own attachment methods; `Rest` prepares the sites without attaching components.
 
-Configure attachment settings on the chosen leg implementation. For example, `build_hinge_leg(angle=15, angular_range=(-30, 30))` selects its final hinge angle and limits in degrees. See the [leg spec](specs/leg_spec.md) for its attachment behavior and cavity geometry.
+For hinge legs, `build_hinge_leg(angular_range=(-30, 30))` sets the permitted angle range in degrees. Choose an angle when calling the installation's `attach_to(assembly, angle=...)`. See the [leg spec](specs/leg_spec.md) for attachment behavior and cavity geometry.
 
 ### Rest: shared behavior and body implementations
 
-`RestGeometry` supplies a finished `Part` containing one solid and three typed rigid joints on that body: `left_mount_joint`, `right_mount_joint`, and `violin_joint`. Concrete geometry implementations handle any positioning and shoulder contouring needed during construction. `Rest(geometry, leg)` installs both legs and creates the completed assembly at the body's pose. Supplying the geometry transfers its body for construction and nesting; leg implementations modify it in place.
+`RestGeometry` supplies a finished `Part` containing one solid and three typed rigid joints on that body: `left_mount_joint`, `right_mount_joint`, and `violin_joint`. Concrete geometry implementations handle any positioning and shoulder contouring needed during construction. `Rest(geometry, leg)` prepares both leg sites and creates an assembly containing the cut body at its intended pose. Supplying the geometry transfers its body for construction and nesting; leg implementations modify it in place.
 
 ```python
 from shoulder_rest.parts.leg.hinge_leg import build_hinge_leg
@@ -91,21 +91,29 @@ from shoulder_rest.parts.violin_outline.spline_violin_outline import build_violi
 
 violin = build_violin_outline()
 geometry = SimpleRestGeometry(violin, SimpleRestParameters(width=44, thickness=12))
-rest = Rest(
-    geometry, build_hinge_leg(angle=15),
-    right_leg=build_hinge_leg(angle=-10),
-)
+rest = Rest(geometry, build_hinge_leg())
+left_leg = rest.left.attach_to(rest.assembly, angle=15)
+right_leg = rest.right.attach_to(rest.assembly, angle=-10)
 rest.position_on(violin)
 assembly = rest.assembly
 ```
 
 `assembly` is ready for display or nesting; `part` is its printable body child. Omitting `right_leg` uses the supplied template independently for both sides; providing it allows different settings or attachment mechanisms.
 
+`Rest[InstallationT]` preserves the leg's installation type through `left`, `right`, and the `installations` tuple. With hinge legs, both sides are inferred as frozen `HingeLegInstallation` descriptors, including through `build_simple_rest`. Optionally add housing guides:
+
+```python
+left_housing = rest.left.attach_housing_to(rest.assembly)
+right_housing = rest.right.attach_housing_to(rest.assembly)
+```
+
+Each attachment call adds and returns a fresh component, including when the destination is already positioned or nested. Repeating a call adds another component; it does not update an earlier one. Housing guides stay at the body site independently of leg angle. Attach to `rest.assembly` to have components follow the rest's subsequent movement. The descriptor holds references to mutable CAD objects but has no angle or attachment state. Its `housing` and `tool` properties also provide optional world-positioned snapshots. Both sides share one installation type parameter; mixing different installation types uses their common interface.
+
 If the geometry is already fitted to the shoulder and violin, its placement carries into `Rest` without another positioning step. Otherwise, position the violin first and call `rest.position_on(violin)`. All `position_on` methods move their receiver once, before scene nesting; call them again when their reference moves. Move `rest.assembly` to move the rest independently, keeping its children together.
 
 Custom outlines can subclass `ViolinOutline` to inherit `position_on(shoulder)`. Custom rest geometry only needs to provide the body and three attachment properties, either by subclassing `RestGeometry` or satisfying it structurally. `Rest` provides placement of the completed assembly.
 
-`SimpleRestGeometry` builds a flat rounded bar without a shoulder contact cut. Change `SimpleRestParameters` for dimensions and attachment fractions, or implement `RestGeometry` for a different body and contouring workflow. `build_simple_rest(violin, leg, parameters)` is a convenience factory for the rounded geometry and assembled rest. The [rest spec](specs/rest_spec.md) describes geometry ownership and coordinate conventions. Preview the complete fitting scene with `uv run python -m shoulder_rest.parts.rest`.
+`SimpleRestGeometry` builds a flat rounded bar without a shoulder contact cut. Change `SimpleRestParameters` for dimensions and attachment fractions, or implement `RestGeometry` for a different body and contouring workflow. `build_simple_rest(violin, leg, parameters)` is a convenience factory for the rounded body and its installation sites. The [rest spec](specs/rest_spec.md) describes geometry ownership and coordinate conventions. Preview the complete fitting scene with `uv run python -m shoulder_rest.parts.simple_rest`.
 
 `ContouredRestGeometry` demonstrates fitting during construction. It positions the violin on the supplied shoulder, extends the right half of a rounded bar to an oversized depth, and subtracts `shoulder.extended`. It defines the joints on the finished body at its fitted pose:
 
@@ -117,6 +125,8 @@ geometry = ContouredRestGeometry(
     violin, shoulder, ContouredRestParameters(contact_depth=80),
 )
 rest = Rest(geometry, build_hinge_leg())
+rest.left.attach_to(rest.assembly)
+rest.right.attach_to(rest.assembly)
 # Already fitted: display rest.assembly with shoulder.assembly and violin.block.
 ```
 

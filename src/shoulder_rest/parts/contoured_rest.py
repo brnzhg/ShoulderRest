@@ -149,4 +149,8 @@ if __name__ == "__main__":
     scene = Compound(label="Contoured rest fitting", children=[
         shoulder.assembly, violin.block, rest.assembly,
     ])
+    rest.left.attach_to(rest.assembly, angle=20)
+    rest.right.attach_to(rest.assembly)
+    rest.left.attach_housing_to(rest.assembly)
+    rest.right.attach_housing_to(rest.assembly)
     show(scene)

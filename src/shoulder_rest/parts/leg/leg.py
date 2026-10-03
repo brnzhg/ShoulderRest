@@ -6,40 +6,20 @@ from build123d import Compound, Location, Part, RigidJoint
 
 
 class LegInstallation(Protocol):
-    """Independent installation result responsible for its own final attachment.
-
-    Each installation preserves the body's local modeling frame and placement.
-    Complete every installation before calling attach_to with the final body.
-    Joint types, attachment settings, and connection details belong to the
-    implementation. Tools and guides remain snapshots at installation time.
-    """
+    """An installation site; concrete implementations define attachment methods."""
 
     @property
-    def leg(self) -> Compound:
-        """Independent leg assembly, ready for attachment and scene nesting."""
+    def body(self) -> Part:
+        """Body containing the installation site."""
         ...
 
     @property
-    def tool(self) -> Part:
-        """Positioned cavity tool snapshot."""
-        ...
-
-    @property
-    def housing(self) -> Part:
-        """Positioned surrounding-material guide snapshot."""
-        ...
-
-    def attach_to(self, final_body: Part) -> None:
-        """Attach this leg to the final body before nesting either in a scene.
-
-        Use the retained local installation frame and final_body's placement to
-        create attachment joints or position the leg without changing body
-        geometry. No attachment joint needs to survive the intermediate cuts.
-        """
+    def local_placement(self) -> Location:
+        """Neutral leg source frame relative to the body's modeling frame."""
         ...
 
 
-class Leg(Protocol):
+class Leg[InstallationT: LegInstallation](Protocol):
     """Geometry and installation interface for a shoulder-rest implementation."""
 
     @property
@@ -69,13 +49,12 @@ class Leg(Protocol):
 
     def install(
         self, body: Part, *, at: Location, joint_label: str = "leg",
-    ) -> LegInstallation:
-        """Modify body in place at a local frame and return an independent leg result.
+    ) -> InstallationT:
+        """Modify body in place at a local frame and return an installation site.
 
-        Preserve the body's modeling frame and placement. Existing joints and
-        connections need not be carried through cuts. The caller transfers
-        the Part for construction and final nesting.
-        Retain attachment data locally and create final joints in attach_to().
+        Preserve the body's modeling frame, placement, and existing site joints.
+        The caller transfers the Part for construction and final nesting.
+        Concrete installation methods choose which components to attach later.
         Use joint_label to distinguish attachments from other installations.
         """
         ...

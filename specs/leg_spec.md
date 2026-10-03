@@ -4,36 +4,43 @@ Source: [Onshape Hinge Slot Leg](https://cad.onshape.com/documents/4b6fd83d4ef91
 
 ## Interface
 
-`build_hinge_leg(LegParameters(...), CavityParameters(...), angle=0, angular_range=(-180, 180))` returns `HingeLeg`, implementing the `Leg` protocol:
+`build_hinge_leg(LegParameters(...), CavityParameters(...), angular_range=(-180, 180))` returns `HingeLeg`, implementing `Leg[HingeLegInstallation]`:
 
 - `assembly`: printable leg and metal rod as separate children. Use the typed `rod_joint`, `screw_joint`, `nut_joint`, and `mount_joint` properties to position the complete assembly. `HingeLegPart` also exposes `rod_joint`, `screw_joint`, and `nut_joint` on the printable child.
 - `part`: printable `HingeLegPart` child, for export. `HingeLeg.rod` exposes the metal hardware child.
 - `tool`: cavity and rod insertion slots, as an independent snapshot.
 - `housing`: symmetric surrounding-material guide with the cavity removed. It is a modeling guide, not a strength guarantee.
 - `mount_joint`: installation frame on `assembly`. Positioning this assembly also positions subsequently retrieved tool/guide snapshots; leave the individual children in their local frames.
-- `install(body, at=local_frame, joint_label=...)`: returns `HingeLegInstallation`, implementing `LegInstallation`. It cuts the supplied body in place and returns an independent `leg` assembly and positioned `tool`/`housing` snapshots. Its `attach_to(final_body)` uses the retained local installation placement to create a hinge and matching rod joint, then connects them at the configured angle. The leg template is unchanged.
-- `angle` and `angular_range` are template constructor options in degrees. The range must be finite and include zero; the angle must be finite and within that range. These settings are captured by each installation. `rod_joint_label`, `local_placement`, `joint_label`, and `angle` are hinge-specific result details, outside the generic interface.
+- `install(body, at=local_frame, joint_label=...)`: cuts the supplied body in place and returns a frozen `HingeLegInstallation` site descriptor. Its public `body` and `local_placement` satisfy `LegInstallation`. It retains a rigid site joint and references to the component templates; installation does not add a leg assembly.
+- `angular_range` is a template constructor option in degrees. The range must be finite and include zero. The template's rod-and-leg assembly has its revolute joint from construction.
 
-Installation cuts a `Part` containing one solid, preserving its modeling frame and placement. A private `BuildPart(body.location)` uses `Locations` to insert the body in its local frame and subtract the cavity at the local installation placement. After validation, the cut geometry replaces the body's `wrapped` shape in place. The body retains its label, color, and existing joints. Installation does not add housing material. A missing intersection or disconnected result raises `ValueError`. Final attachment rejects a duplicate hinge label or nested body/leg.
+`attach_to(assembly, angle=0)` adds and returns a fresh rod-and-leg `Compound`, enforcing the angular range. `attach_housing_to(assembly)` independently adds and returns a housing guide `Part` at the neutral site. Both methods account for the body's and destination's world placements, including nested assemblies. Repeated calls add independent components. The descriptor has no angle state or attachment lifecycle; its referenced CAD objects remain mutable. Components subsequently follow their destination assembly, so use the rest assembly when they should move with the body.
+
+`tool` and `housing` also return fresh world-positioned snapshots using `body.global_location * local_placement`. Previously retrieved snapshots do not track movement. Neither these properties nor the attachment methods are required by the common installation protocol.
+
+Installation cuts a `Part` containing one solid, preserving its modeling frame and placement. A private `BuildPart(body.location)` uses `Locations` to insert the body in its local frame and subtract the cavity at the local installation placement. After validation, the cut geometry replaces the body's `wrapped` shape in place. The body retains its label, color, and existing joints. Installation does not add housing material. A missing intersection or disconnected result raises `ValueError`. Installation requires an un-nested body and a new nonempty site joint label.
 
 ## Frames and use
 
 Source frame: rod along X through the origin, nut housing toward +Y, screw along Z. The mount is centered on the nut-seat edge, matching the origin of Onshape's **Mate connector 1**: `(0, 10.425, 3.1)` by default. Its explicit axes are X along source +X and Z along source -Z (toward the rest).
 
-For a rest modeled below its XY mounting surface, the rest implementation supplies mounts with Z pointing downward. `Rest` consumes these joints through `RestGeometry`, installs the templates at both frames and delegates final attachment to their installation results:
+For a rest modeled below its XY mounting surface, the rest implementation supplies mounts with Z pointing downward. `Rest` prepares both sites; the caller chooses attachments:
 
 ```python
 from shoulder_rest.parts.leg.hinge_leg import build_hinge_leg
 from shoulder_rest.parts.simple_rest import build_simple_rest
 
-rest = build_simple_rest(
-    violin, build_hinge_leg(angle=15), right_leg=build_hinge_leg(angle=-10),
-)
+rest = build_simple_rest(violin, build_hinge_leg())
+rest.left.attach_to(rest.assembly, angle=15)
+rest.right.attach_to(rest.assembly, angle=-10)
+rest.left.attach_housing_to(rest.assembly)
 rest.position_on(violin)
 assembly = rest.assembly
 ```
 
-For lower-level modeling, `Leg.install(body, at=...)` accepts a `Location` in the un-nested body's local modeling frame. For an existing rigid mount, pass `mount.relative_location`, not its world location. Complete all cuts, then call each installation's `attach_to(final_body)` before nesting the body or legs. The method creates its revolute joint on the final body and applies the configured angle; the caller does not need to retrieve or connect that joint. Attachment first positions the leg at its neutral installation placement, then creates the rod joint from the hinge's actual zero-angle frame. An axis does not retain roll, so independently deriving the two joint frames can disagree after world/local transforms. Using the same frame makes angle zero reproduce the cutting pose; positive angles follow the right-hand rule about mount +X. Angle limits describe kinematics, not a collision-free range. Tool and housing snapshots remain in the installation pose when the leg rotates.
+For lower-level modeling, `Leg.install(body, at=...)` accepts a `Location` in the un-nested body's local modeling frame. For an existing rigid mount, pass `mount.relative_location`, not its world location. The rigid site joint matches the template hinge's actual zero frame, so angle zero reproduces the cutting pose. The moving revolute joint points along source -X: placement from the fixed rigid joint then makes positive attachment angles turn about mount +X. `relative_to` computes the joint placement without repositioning the body or modifying the descriptor. Angle limits describe kinematics, not a collision-free range.
+
+Adding a build123d child reconstructs its parent compound at the origin. The attachment helper preserves the destination and ancestor placements and refreshes their compounds so nested scene geometry includes the added component.
 
 ## Geometry and references
 

@@ -16,7 +16,7 @@ from build123d import (
 )
 
 from shoulder_rest.parts.kun import KunParameters, nut_slot_face, screw_hole_face
-from .leg import Leg, LegInstallation
+from .leg import Leg
 
 
 @dataclass(frozen=True)
@@ -306,56 +306,82 @@ def _housing_guide(p: LegParameters, c: CavityParameters, tool: Part) -> Part:
     return guide.part_local
 
 
+def _attach_component(component: Compound, assembly: Compound) -> None:
+    """Refresh the assembly tree while retaining its existing placements."""
+    ancestors = [(parent, parent.location) for parent in reversed(assembly.path)]
+    component.parent = assembly
+    # build123d rebuilds compounds at the origin when their children change.
+    for parent, pose in ancestors:
+        parent.children = parent.children
+        parent.locate(pose)
+
+
 @dataclass(frozen=True)
 class HingeLegInstallation:
-    """Hinge-specific result; captures the configured final angle in degrees."""
-    leg: Compound
-    tool: Part
-    housing: Part
-    joint_label: str
-    rod_joint_label: str
-    angle: float
+    """A body-relative hinge site; each attachment creates a new component."""
+
+    body: Part
     local_placement: Location
-    angular_range: tuple[float, float]
+    _mount_joint: RigidJoint
+    _assembly: Compound
+    _hinge: RevoluteJoint
+    _tool: Part
+    _housing: Part
 
-    def attach_to(self, final_body: Part) -> None:
-        """Create the hinge on the finished body and connect the installed rod."""
-        if final_body.parent is not None or final_body.children or self.leg.parent is not None:
-            raise ValueError("Attach the leg before nesting the body or leg in an assembly")
-        if self.joint_label in final_body.joints:
-            raise ValueError(f"Final body already has a joint named {self.joint_label!r}")
-        placement = final_body.location * self.local_placement
-        hinge = RevoluteJoint(
-            self.joint_label, final_body, Axis.X.located(placement),
-            angular_range=self.angular_range,
+    @property
+    def tool(self) -> Part:
+        """Cavity tool snapshot at the body's current world placement."""
+        return self._tool.moved(self.body.global_location * self.local_placement)
+
+    @property
+    def housing(self) -> Part:
+        """Housing snapshot at the body attachment, independent of hinge angle."""
+        return self._housing.moved(self.body.global_location * self.local_placement)
+
+    def attach_to(self, assembly: Compound, *, angle: float = 0) -> Compound:
+        """Add a fresh rod-and-leg assembly at angle degrees about mount +X.
+
+        The destination may already be positioned or nested. Repeated calls add
+        independent components; they do not replace earlier attachments.
+        """
+        minimum, maximum = self._hinge.angular_range
+        if not isfinite(angle) or not minimum <= angle <= maximum:
+            raise ValueError("Hinge angle must be finite and within the angular range")
+        # Copy together so the typed hinge reference belongs to the new assembly.
+        leg, hinge = deepcopy((self._assembly, self._hinge))
+        leg.locate(
+            assembly.global_location.inverse() * self.body.global_location
+            * self._mount_joint.relative_to(hinge, angle=angle)
         )
-        # Use this hinge's actual zero frame; an axis alone does not retain roll.
-        self.leg.locate(placement)
-        rod_joint = RigidJoint(self.rod_joint_label, self.leg, hinge.location)
-        hinge.connect_to(rod_joint, angle=self.angle)
+        _attach_component(leg, assembly)
+        return leg
+
+    def attach_housing_to(self, assembly: Compound) -> Part:
+        """Add a fresh housing guide at the body site, without hinge rotation."""
+        housing = self._housing.moved(
+            assembly.global_location.inverse() * self.body.global_location
+            * self.local_placement
+        )
+        _attach_component(housing, assembly)
+        return housing
 
 
-class HingeLeg(Leg):
+class HingeLeg(Leg[HingeLegInstallation]):
     """Reusable leg template, cutter and housing guide sharing one source frame.
 
     The mount uses the Onshape connector's origin, with explicit axes: X along
     the rod and Z toward the rest (-Z in the source frame). Connect/install
-    before nesting this leg assembly in the final assembly. Installation cuts
-    the supplied body in place and copies the leg template. Move assembly, not
-    its individual hardware children.
+    before nesting the body in the final assembly. Installation cuts the body;
+    explicit attachment calls copy the leg template into a chosen assembly.
     """
 
     def __init__(
         self, parameters: LegParameters = LegParameters(),
         cavity: CavityParameters = CavityParameters(),
-        *, angle: float = 0, angular_range: tuple[float, float] = (-180, 180),
+        *, angular_range: tuple[float, float] = (-180, 180),
     ) -> None:
         if not all(isfinite(a) for a in angular_range) or not angular_range[0] <= 0 <= angular_range[1]:
             raise ValueError("Angular range must be finite and include the neutral angle (0)")
-        if not isfinite(angle) or not angular_range[0] <= angle <= angular_range[1]:
-            raise ValueError("Hinge angle must be finite and within the angular range")
-        self._angle = angle
-        self._angular_range = angular_range
         self._part = HingeLegPart(parameters)
         self._tool = _cavity_tool(parameters, cavity)
         self._housing = _housing_guide(parameters, cavity, self._tool)
@@ -366,6 +392,11 @@ class HingeLeg(Leg):
         self._rod.label = "Metal hinge rod"
         self._rod.color = Color("silver")
         self._assembly = Compound(label="Hinge leg assembly", children=[self._part, self._rod])
+        # The moving joint uses -X so positive attachment angles turn about +X.
+        self._hinge = RevoluteJoint(
+            "hinge", self._assembly, Axis((0, 0, 0), (-1, 0, 0)),
+            angular_range=angular_range,
+        )
         self._rod_joint = RigidJoint(
             self._part.rod_joint.label, self._assembly, self._part.rod_joint.location,
         )
@@ -423,10 +454,10 @@ class HingeLeg(Leg):
     def install(
         self, body: Part, *, at: Location, joint_label: str = "leg",
     ) -> HingeLegInstallation:
-        """Cut body in place and return it with an independent leg assembly."""
+        """Cut body in place and describe the site for later component attachment."""
         if not isinstance(body, Part) or body.parent is not None or body.children:
             raise ValueError("Install on an un-nested Part before assembly")
-        if not joint_label:
+        if not joint_label or joint_label in body.joints:
             raise ValueError("Choose a new, nonempty hinge joint label")
 
         local_placement = at * self.mount_joint.relative_location.inverse()
@@ -447,25 +478,28 @@ class HingeLeg(Leg):
         # Replace only the geometry, retaining the body's identity and attributes.
         body.wrapped = rest.wrapped
 
+        mount_joint = RigidJoint(
+            joint_label, body, placement * self._hinge.relative_axis.location,
+        )
+
         return HingeLegInstallation(
-            leg=deepcopy(self._assembly).locate(placement),
-            tool=self._tool.moved(placement),
-            housing=self._housing.moved(placement),
-            joint_label=joint_label,
-            rod_joint_label=self.rod_joint.label,
-            angle=self._angle,
+            body=body,
             local_placement=local_placement,
-            angular_range=self._angular_range,
+            _mount_joint=mount_joint,
+            _assembly=self._assembly,
+            _hinge=self._hinge,
+            _tool=self._tool,
+            _housing=self._housing,
         )
 
 
 def build_hinge_leg(
     parameters: LegParameters = LegParameters(),
     cavity: CavityParameters = CavityParameters(),
-    *, angle: float = 0, angular_range: tuple[float, float] = (-180, 180),
+    *, angular_range: tuple[float, float] = (-180, 180),
 ) -> HingeLeg:
-    """Build a hinge template with its final attachment angle and limits in degrees."""
-    return HingeLeg(parameters, cavity, angle=angle, angular_range=angular_range)
+    """Build a hinge template with attachment angle limits in degrees."""
+    return HingeLeg(parameters, cavity, angular_range=angular_range)
 
 
 if __name__ == "__main__":

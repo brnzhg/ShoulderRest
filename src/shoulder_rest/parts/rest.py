@@ -11,18 +11,18 @@ _LEFT_INSTALLATION_LABEL = "left_leg"
 _RIGHT_INSTALLATION_LABEL = "right_leg"
 
 
-class Rest:
-    """Install and assemble two legs on a finished RestGeometry.
+class Rest[InstallationT: LegInstallation]:
+    """Prepare two leg sites on a finished RestGeometry.
 
     Reads the geometry's typed local frames and passes its body to installation.
-    Installs two independent legs, delegates their final attachment, and owns the
-    completed assembly. Move the whole assembly, never its individual children.
+    Owns an assembly initially containing only the cut body. The caller chooses
+    components through the concrete installations' attachment methods.
     The supplied leg template serves both sides unless right_leg is provided.
     """
 
     def __init__(
-        self, geometry: RestGeometry, leg: Leg, *,
-        right_leg: Leg | None = None,
+        self, geometry: RestGeometry, leg: Leg[InstallationT], *,
+        right_leg: Leg[InstallationT] | None = None,
     ) -> None:
         body = geometry.part
         if body.parent is not None or body.children:
@@ -45,7 +45,7 @@ class Rest:
             body, at=right_frame, joint_label=_RIGHT_INSTALLATION_LABEL,
         )
         self._part = body
-        self._installations = (left, right)
+        self._installations: tuple[InstallationT, InstallationT] = (left, right)
         # Create the rest's public frames once, on the finished body.
         self._left_mount_joint = RigidJoint(
             geometry.left_mount_joint.label, self._part, self._part.location * left_frame,
@@ -53,10 +53,8 @@ class Rest:
         self._right_mount_joint = RigidJoint(
             geometry.right_mount_joint.label, self._part, self._part.location * right_frame,
         )
-        left.attach_to(self._part)
-        right.attach_to(self._part)
         self._assembly = Compound(
-            label="Shoulder rest", children=[self._part, left.leg, right.leg],
+            label="Shoulder rest", children=[self._part],
         )
         # The external joint belongs to the assembly so alignment moves all parts.
         self._violin_joint = RigidJoint(
@@ -70,7 +68,7 @@ class Rest:
 
     @property
     def assembly(self) -> Compound:
-        """Completed body and legs; repeated access returns the same assembly."""
+        """Cut body and any explicitly attached components."""
         return self._assembly
 
     @property
@@ -89,8 +87,18 @@ class Rest:
         return self._right_mount_joint
 
     @property
-    def installations(self) -> tuple[LegInstallation, LegInstallation]:
-        """Left and right installation results; tools remain construction snapshots."""
+    def left(self) -> InstallationT:
+        """Left installation with its implementation-specific controls."""
+        return self._installations[0]
+
+    @property
+    def right(self) -> InstallationT:
+        """Right installation with its implementation-specific controls."""
+        return self._installations[1]
+
+    @property
+    def installations(self) -> tuple[InstallationT, InstallationT]:
+        """Left and right installations, retaining the leg's installation type."""
         return self._installations
 
     def position_on(self, violin: ViolinOutline) -> None:

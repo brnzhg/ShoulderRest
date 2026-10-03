@@ -8,7 +8,7 @@ from build123d import (
     RigidJoint, SlotCenterToCenter, Vector, extrude,
 )
 
-from shoulder_rest.parts.leg import Leg
+from shoulder_rest.parts.leg import Leg, LegInstallation
 from shoulder_rest.parts.rest import Rest
 from shoulder_rest.parts.rest_geometry import RestGeometry
 from shoulder_rest.parts.violin_outline import ViolinOutline
@@ -91,12 +91,12 @@ class SimpleRestGeometry(RestGeometry):
         return self._violin_joint
 
 
-def build_simple_rest(
-    violin: ViolinOutline, leg: Leg,
+def build_simple_rest[InstallationT: LegInstallation](
+    violin: ViolinOutline, leg: Leg[InstallationT],
     parameters: SimpleRestParameters = SimpleRestParameters(), *,
-    right_leg: Leg | None = None,
-) -> Rest:
-    """Build a complete rest in local outline coordinates, ready for positioning.
+    right_leg: Leg[InstallationT] | None = None,
+) -> Rest[InstallationT]:
+    """Build a rest body and leg sites in local outline coordinates.
 
     The mounting face is Z=0 and material extends toward -Z. The violin joint
     offsets the whole rest below the violin by ``violin_gap`` when positioned.
@@ -135,6 +135,8 @@ if __name__ == "__main__":
     violin.position_on(shoulder)
     geometry = SimpleRestGeometry(violin, SimpleRestParameters(thickness=10, left_fraction=0.4, right_fraction=0.4, violin_gap=12))
     rest = Rest(geometry, build_hinge_leg())
+    rest.left.attach_to(rest.assembly)
+    rest.right.attach_to(rest.assembly)
     rest.position_on(violin)
     assembly = Compound(label="Rest fitting example", children=[
         shoulder.assembly, violin.block, rest.assembly,
