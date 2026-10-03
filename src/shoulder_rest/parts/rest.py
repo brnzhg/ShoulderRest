@@ -42,9 +42,9 @@ class Rest[InstallationT: LegInstallation]:
         )
         right_template = leg if right_leg is None else right_leg
         right = right_template.install(
-            body, at=right_frame, joint_label=_RIGHT_INSTALLATION_LABEL,
+            left.body, at=right_frame, joint_label=_RIGHT_INSTALLATION_LABEL,
         )
-        self._part = body
+        self._part = right.body
         self._installations: tuple[InstallationT, InstallationT] = (left, right)
         # Create the rest's public frames once, on the finished body.
         self._left_mount_joint = RigidJoint(

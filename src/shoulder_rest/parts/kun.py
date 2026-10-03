@@ -1,9 +1,12 @@
 """Reusable cutting profiles for the Kun screw leg; dimensions are in millimeters."""
 
 from dataclasses import dataclass, fields
-from math import acos, cos, degrees, isfinite, radians, sin, sqrt, tan
+from math import cos, isfinite, radians, sin, sqrt, tan
 
-from build123d import BuildLine, BuildSketch, CenterArc, Face, Mode, Plane, Polyline, Rectangle, make_face, mirror
+from build123d import (
+    Align, BuildLine, BuildSketch, Circle, Face, Keep, Locations, Mode, Plane,
+    PolarLine, Polyline, Rectangle, make_face, mirror, split,
+)
 
 
 @dataclass(frozen=True)
@@ -14,14 +17,14 @@ class KunParameters:
     nut_slot_height: float = 3.4
     screw_diameter: float = 4.0
     screw_circle_offset: float = 0.1
-    screw_flat_x: float = 1.9
-    screw_roof_extension: float = 0.2
-    screw_tangent_angle: float = 40.0
+    screw_flat_half_height: float = 1.9  # Squared-off side's extent along +X.
+    screw_roof_extension: float = 0.2  # Clipped roof's extent beyond the circle along -X.
+    screw_tangent_angle: float = 40.0  # Upper tangent contact radius's angle from -X.
 
     def __post_init__(self) -> None:
         if any(not isfinite(getattr(self, f.name)) for f in fields(self)):
             raise ValueError("Kun dimensions must be finite")
-        if min(self.nut_slot_width, self.nut_slot_height, self.screw_diameter, self.screw_flat_x) <= 0:
+        if min(self.nut_slot_width, self.nut_slot_height, self.screw_diameter, self.screw_flat_half_height) <= 0:
             raise ValueError("Kun opening dimensions must be positive")
         radius = self.screw_diameter / 2
         if not 0 <= self.screw_circle_offset < radius or self.screw_roof_extension < 0:
@@ -41,27 +44,30 @@ class KunParameters:
 def screw_hole_face(p: KunParameters = KunParameters()) -> Face:
     """XY opening at nominal screw axis (0, 0); extrude along Z.
 
-    The circular sides preserve the screw clearance; the flats and roof match
-    the source's print-oriented opening rather than approximating it as a bore.
+    Keep the circle on -X, square off its +X side, and extend a clipped tangent
+    roof on -X. The profile is symmetric about X; its circle is offset along +X.
     """
     radius = p.screw_diameter / 2
     center_x = p.screw_circle_offset
-    angle = radians(p.screw_tangent_angle)
-    half_span = sqrt(radius**2 - center_x**2)
-    tangent_x = center_x - radius * cos(angle)
-    tangent_y = radius * sin(angle)
+    half_span = sqrt(radius**2 - center_x**2)  # Circle's half-chord at X=0.
     roof_x = center_x - radius - p.screw_roof_extension
-    roof_y = tangent_y - (tangent_x - roof_x) / tan(angle)
-    arc_start = degrees(acos(-center_x / radius))  # Circle's intersection with X=0.
-    arc_end = 180 - p.screw_tangent_angle
     with BuildSketch(mode=Mode.PRIVATE) as profile:
+        with Locations((center_x, 0)):
+            Circle(radius)
+        circle = profile.edge()
+
+        # Replace the +X half with a rectangle meeting the circle at its chord.
+        split(bisect_by=Plane.YZ, keep=Keep.BOTTOM)
+        Rectangle(p.screw_flat_half_height, 2 * half_span, align=(Align.MIN, Align.CENTER))
+
+        # Follow the circle's upper tangent until it meets the roof's clipped tip.
+        roof_clip = Plane.YZ.offset(roof_x)
+        contact = (180 - p.screw_tangent_angle) / 360  # Fraction of the full circle.
         with BuildLine():
-            # Upper boundary: flat back, circular shoulder, tangent roof, clipped tip.
-            shoulder = CenterArc((center_x, 0), radius, arc_start, arc_end - arc_start)
-            Polyline((p.screw_flat_x, 0), (p.screw_flat_x, half_span), shoulder @ 0)
-            Polyline(shoulder @ 1, (roof_x, roof_y), (roof_x, 0))
-            mirror(about=Plane.XZ)
-        make_face()
+            tangent = PolarLine(circle @ contact, length=roof_clip, direction=circle % contact)
+            Polyline(tangent @ 1, roof_clip.origin, (0, 0), tangent @ 0)
+        roof_half = make_face()
+        mirror(roof_half, about=Plane.XZ)
     return profile.face()
 
 

@@ -48,7 +48,7 @@ The printed leg and cavity share the lower side profile (rounded nose, underside
 
 Private `BuildSketch` helpers construct the side profiles in local XY, where horizontal corresponds to body Y and vertical to body Z. `BuildPart` places them on YZ planes for extrusion. Kun helpers retain their public XY screw-hole and YZ nut-slot frames. Helpers do not add geometry to a caller's active builder; the caller explicitly inserts their output.
 
-The rod channel combines a diamond seat with horizontal and upright rectangles, then rounds the two turning corners. The Kun screw opening constructs its upper boundary from a circular arc and straight segments, then mirrors it across the screw centerline.
+The rod channel combines a diamond seat with horizontal and upright rectangles, then rounds the two turning corners. The Kun screw opening starts with an offset circle, replaces its +X side with a rectangle at the X=0 chord, and adds a tangent roof on -X. A `PolarLine` follows the circle's tangent to the roof's clipping plane; mirroring the upper roof across X completes the symmetric opening.
 
 Hardware and fits are configured separately:
 
@@ -69,7 +69,7 @@ The default bore is rod diameter + 0.3 mm; insertion-slot width is diameter + 0.
 The reusable Kun profiles return fresh `Face` objects: `screw_hole_face(kun)` lies in XY at the nominal screw axis, for extrusion along Z; `nut_slot_face(kun)` is centered in YZ, with width along Y and height along Z, for extrusion along X. Position/rotate the faces with build123d `Location` before extruding. Their fitted opening dimensions already include the intended fit; they do not model the metal nut or Kun foot.
 
 - Printed leg: 12 mm wide; 6.2 mm rod housing; 2.3 mm default bore; 1.5 mm nose radii. Nut slot: 8.65 × 3.4 mm, with 2 mm walls. Rear relief: 20° from vertical. Outside chamfers: 0.3 mm.
-- Screw passage: 4 mm circular sides offset 0.1 mm along X, flat at X=1.9, tangent roof segments at 40° from -X, clipped 0.2 mm beyond the circle. This retains the source's printable profile.
+- Screw passage: 4 mm circular sides offset 0.1 mm along X, flat at X=1.9, roof tangent contact radius at 40° from -X, clipped 0.2 mm beyond the circle. This retains the source's printable profile.
 - Cutter: 0.1 mm general clearance plus 0.1 mm extra underside clearance. Rod insertion channel: 2.1 mm wide, 3 mm run, 0.2/1.1 mm corner radii, extruded across 21 mm.
 - Guide: 2 mm nominal body margin and 1 mm rod-end caps. Its symmetric underside fills the source Dummy Housing's one-sided notch, adding approximately 183.355308 mm³; it otherwise contains the source guide exactly.
 

@@ -4,7 +4,7 @@ The rod axis is X through the origin. The nut housing extends toward +Y;
 the screw runs along Z. Lengths are in millimeters and angles in degrees.
 """
 
-from copy import deepcopy
+from copy import deepcopy, copy
 from dataclasses import dataclass, fields
 from math import isfinite, radians, sqrt, tan
 
@@ -49,8 +49,6 @@ class LegParameters:
     def __post_init__(self) -> None:
         sizes = (self.width, self.wall, self.rod_house_length, self.nose_radius)
         gaps = (self.rod_bore_clearance, self.housing_gap, self.edge_chamfer)
-        if not all(isfinite(v) for v in (*sizes, *gaps, self.rear_relief_angle)):
-            raise ValueError("Leg dimensions must be finite")
         if min(sizes) <= 0 or min(gaps) < 0:
             raise ValueError("Sizes must be positive; clearances, gaps and chamfer may be zero")
         if not 0 < self.rear_relief_angle < 90:
@@ -63,16 +61,8 @@ class LegParameters:
             raise ValueError("Chamfer is too large for the housing")
         k = self.kun
         roof_x = k.screw_circle_offset - k.screw_diameter / 2 - k.screw_roof_extension
-        if max(abs(roof_x), k.screw_flat_x) >= self.width / 2 - self.edge_chamfer:
+        if max(abs(roof_x), k.screw_flat_half_height) >= self.width / 2 - self.edge_chamfer:
             raise ValueError("Screw opening must fit between the side faces")
-
-    @property
-    def rod_hole_diameter(self) -> float:
-        return self.rod.diameter + self.rod_bore_clearance
-
-    @property
-    def rod_half(self) -> float:
-        return self.rod_house_length / 2
 
     @property
     def nose_swing_radius(self) -> float:
@@ -80,8 +70,19 @@ class LegParameters:
         return sqrt(2) * (self.rod_half - self.nose_radius) + self.nose_radius
 
     @property
+    def rod_hole_diameter(self) -> float:
+        return self.rod.diameter + self.rod_bore_clearance
+
+    # TODO probably add _y to this. Consider removing, not the most intuitive property
+    @property
     def housing_start(self) -> float:
         return self.rod_half + self.housing_gap
+
+    # TODO get rid of this, bad name (omits "house") and questionable utility
+    # constructions using this should probably be refactored to be clearer
+    @property
+    def rod_half(self) -> float:
+        return self.rod_house_length / 2
 
     @property
     def screw_y(self) -> float:
@@ -350,8 +351,8 @@ class HingeLegInstallation:
         # Copy together so the typed hinge reference belongs to the new assembly.
         leg, hinge = deepcopy((self._assembly, self._hinge))
         leg.locate(
-            assembly.global_location.inverse() * self.body.global_location
-            * self._mount_joint.relative_to(hinge, angle=angle)
+            assembly.global_location.inverse() * self.body.global_location # position leg on assembly
+            * self._mount_joint.relative_to(hinge, angle=angle) # angle leg
         )
         _attach_component(leg, assembly)
         return leg
@@ -468,22 +469,23 @@ class HingeLeg(Leg[HingeLegInstallation]):
                 insert(body)
             with Locations(local_placement):
                 insert(self._tool, mode=Mode.SUBTRACT)
-        rest = installed.part
-        assert rest is not None
-        if not rest.is_valid or len(rest.solids()) != 1:
+        installed_body = installed.part
+        assert installed_body is not None
+        if not installed_body.is_valid or len(installed_body.solids()) != 1:
             raise ValueError("Installation must leave one valid connected rest solid")
-        if body.volume - rest.volume < 1e-7:
+        if body.volume - installed_body.volume < 1e-7:
             raise ValueError("Cavity tool does not intersect the rest")
 
+        return_body = copy(body)
         # Replace only the geometry, retaining the body's identity and attributes.
-        body.wrapped = rest.wrapped
+        return_body.wrapped = installed_body.wrapped
 
         mount_joint = RigidJoint(
             joint_label, body, placement * self._hinge.relative_axis.location,
         )
 
         return HingeLegInstallation(
-            body=body,
+            body=return_body,
             local_placement=local_placement,
             _mount_joint=mount_joint,
             _assembly=self._assembly,
