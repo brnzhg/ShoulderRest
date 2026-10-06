@@ -38,6 +38,12 @@ Use `violin.position_on(shoulder)` to establish the violin pose and `rest.positi
 
 `left_mount_joint` and `right_mount_joint` belong to the printable body child. Their build123d locations are in rest assembly coordinates; apply the assembly's global placement for world coordinates. `installations` retains the concrete site descriptors; use `rest.part` for the final body. Hinge descriptors are frozen and provide repeatable leg/housing attachment methods plus world-positioned tool/housing snapshots.
 
+## Print orientation
+
+The rest body is PETG and is always printed with the flat leg-mounting face against the bed. Preserve this plane when shaping the body. In the body's local modeling frame this face is Z=0 and the material extends toward -Z, so the print build direction is local -Z. Undo any fitted assembly placement, then turn the body over and place the mounting face on the bed; the shoulder-fitting preview is not a print pose.
+
+The hinge coupon export follows the same convention: rotate its source geometry 180° about X and translate its mounting face to print Z=0. STEP exports retain the modeling pose; coupon STLs are oriented for printing.
+
 ## Rounded bar geometry
 
 `build_simple_rest(violin, leg, parameters, right_leg=None)` returns a `Rest` body and installation sites in the outline's local frame, ready for attachment and positioning:

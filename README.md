@@ -96,6 +96,8 @@ leg = build_hinge_leg(
 
 Preview with `uv run python examples/hinge_snaps.py --nose-clearance 0.2`, or add `--export` to create a rod-fit coupon and matching leg in `exports/hinge_snaps/`.
 
+The PETG rest body is always printed with its flat leg-mounting face against the bed. Flip it from its local modeling orientation (mounting face at Z=0, body extending toward -Z); fitting previews show the assembled pose. The rod bumps sit on the channel wall nearest that face, so they grow upward during printing. Exported coupon STLs already have that face down; the separate leg STL lies on its broad side. See [print orientation](specs/rest_spec.md#print-orientation).
+
 ### Rest: shared behavior and body implementations
 
 `RestGeometry` supplies a finished `Part` containing one solid and three typed rigid joints on that body: `left_mount_joint`, `right_mount_joint`, and `violin_joint`. Concrete geometry implementations handle any positioning and shoulder contouring needed during construction. `Rest(geometry, leg)` prepares both leg sites and creates an assembly containing the cut body at its intended pose. Supplying the geometry transfers its body for construction and nesting; leg implementations modify it in place.

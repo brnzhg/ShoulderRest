@@ -33,9 +33,10 @@ def main() -> None:
         export_step(printed_leg, output / "printed_leg.step")
         export_step(housing, output / "housing_coupon.step")
         export_step(Compound(children=[housing, leg.assembly]), output / "assembly.step")
-        # Put the leg on its broad side. Keep the coupon upright.
+        # Put the leg on its broad side and the coupon's flat mounting face down.
         printed_leg = printed_leg.moved(Rotation(0, 90, 0))
-        for name, part in (("printed_leg", printed_leg), ("housing_coupon", housing)):
+        printed_housing = housing.moved(Rotation(180, 0, 0))
+        for name, part in (("printed_leg", printed_leg), ("housing_coupon", printed_housing)):
             on_bed = part.moved(Pos(0, 0, -part.bounding_box().min.Z))
             export_stl(on_bed, output / f"{name}.stl")
         print(f"Exported STEP assembly, coupon, leg and two on-bed STLs to {output.resolve()}")

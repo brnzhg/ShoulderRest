@@ -16,7 +16,7 @@ if TYPE_CHECKING:
 
 @dataclass(frozen=True)
 class RodRetentionParameters:
-    """Short, solid rounded ribs below each rod channel; no spring reliefs."""
+    """Solid ribs on each channel's +Z wall, which is underneath when printed."""
 
     interference: float = 0.10  # Rod diameter minus minimum throat opening.
     bump_radius: float = 0.45
@@ -32,22 +32,23 @@ def _rod_retention(
     p: "LegParameters", c: "CavityParameters", r: RodRetentionParameters,
 ) -> tuple[Part, Part]:
     half_slot = c.slot_width(p.rod) / 2
-    bump_z = -half_slot + c.rod_slot_clearance + r.interference - r.bump_radius
+    # Source +Z faces the bed: these ribs grow from the printed channel floor.
+    bump_z = half_slot - c.rod_slot_clearance - r.interference + r.bump_radius
     cavity_half = p.width / 2 + c.clearance
     overhang = p.rod.length / 2 - cavity_half
     entry_y = (1 - sqrt(2)) * half_slot + c.rod_slot_run
     if r.interference >= p.rod.diameter:
         raise ValueError("Rod throat must remain open")
     if c.rod_slot_clearance + r.interference >= r.bump_radius:
-        raise ValueError("Bump center must stay embedded below the channel floor")
+        raise ValueError("Bump center must stay embedded in the channel's +Z wall")
     if r.bump_width >= overhang:
         raise ValueError("Rod overhang must leave room for both retention bumps")
     if r.bump_y - r.bump_radius <= 0 or r.bump_y + r.bump_radius >= entry_y:
         raise ValueError("Bumps must fit between the diamond seat and the entry bend")
     if sqrt(r.bump_y**2 + bump_z**2) <= p.rod.diameter / 2 + r.bump_radius:
         raise ValueError("Retention bumps must clear the seated rod")
-    if bump_z - r.bump_radius <= -p.rod_house_half - c.housing_wall:
-        raise ValueError("Retention bumps must fit above the housing bottom")
+    if bump_z + r.bump_radius >= p.rod_house_half:
+        raise ValueError("Retention bumps must fit below the mounting face")
     bumps = []
     for side in (-1, 1):
         with BuildPart(mode=Mode.PRIVATE) as bump:
