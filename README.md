@@ -79,6 +79,23 @@ The rigid installation mount defines the leg's position and orientation. Its Z d
 
 For hinge legs, `build_hinge_leg(angular_range=(-30, 30))` sets the permitted angle range in degrees. Choose an angle when calling the installation's `attach_to(assembly, angle=...)`. See the [leg spec](specs/leg_spec.md) for attachment behavior and cavity geometry.
 
+Optional solid bumps retain the rod. Enlarge the existing stepped nose recess for thin foam with `CavityParameters.nose_clearance`:
+
+```python
+from shoulder_rest.parts.leg.hinge_leg import (
+    build_hinge_leg, CavityParameters, RodRetentionParameters,
+)
+
+leg = build_hinge_leg(
+    cavity=CavityParameters(nose_clearance=0.2),
+    rod_retention=RodRetentionParameters(),
+)
+```
+
+`nose_clearance` defaults to zero and adds room toward -Y and -Z only around the nose. The original leg, rear cavity floor, and outer housing dimensions stay unchanged. Extra clearance uses some of the surrounding wall thickness. No foam or angular-detent geometry is generated. See the [leg spec](specs/leg_spec.md#nose-recess-clearance) for the step dimensions.
+
+Preview with `uv run python examples/hinge_snaps.py --nose-clearance 0.2`, or add `--export` to create a rod-fit coupon and matching leg in `exports/hinge_snaps/`.
+
 ### Rest: shared behavior and body implementations
 
 `RestGeometry` supplies a finished `Part` containing one solid and three typed rigid joints on that body: `left_mount_joint`, `right_mount_joint`, and `violin_joint`. Concrete geometry implementations handle any positioning and shoulder contouring needed during construction. `Rest(geometry, leg)` prepares both leg sites and creates an assembly containing the cut body at its intended pose. Supplying the geometry transfers its body for construction and nesting; leg implementations modify it in place.

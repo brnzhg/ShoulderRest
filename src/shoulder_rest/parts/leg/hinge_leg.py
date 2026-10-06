@@ -4,7 +4,7 @@ The rod axis is X through the origin. The nut housing extends toward +Y;
 the screw runs along Z. Lengths are in millimeters and angles in degrees.
 """
 
-from copy import deepcopy, copy
+from copy import deepcopy
 from dataclasses import dataclass, fields
 from math import isfinite, radians, sqrt, tan
 
@@ -17,6 +17,7 @@ from build123d import (
 
 from shoulder_rest.parts.kun import KunParameters, nut_slot_face, screw_hole_face
 from .leg import Leg
+from .hinge_snaps import RodRetentionParameters, _rod_retention
 
 
 @dataclass(frozen=True)
@@ -188,6 +189,7 @@ class CavityParameters:
 
     clearance: float = 0.1
     bottom_clearance: float = 0.1
+    nose_clearance: float = 0.0  # Extra room toward -Y and -Z in the nose recess.
     rod_slot_clearance: float = 0.1  # Added to the rod diameter.
     rod_slot_run: float = 3.0
     rod_slot_inner_radius: float = 0.2
@@ -200,7 +202,7 @@ class CavityParameters:
         if any(not isfinite(getattr(self, f.name)) for f in fields(self)):
             raise ValueError("Cavity dimensions must be finite")
         if min(
-            self.clearance, self.bottom_clearance, self.rod_slot_clearance,
+            self.clearance, self.bottom_clearance, self.nose_clearance, self.rod_slot_clearance,
             self.rod_slot_radius_clearance, self.rod_length_clearance,
         ) < 0 or min(
             self.rod_slot_run, self.rod_slot_inner_radius,
@@ -220,10 +222,10 @@ class CavityParameters:
 
 def _cavity_profile(p: LegParameters, c: CavityParameters) -> Face:
     """Shared lower profile with nose swing allowance, underside relief and fit."""
-    h, reach = p.rod_house_half, p.nose_swing_radius
+    h, reach = p.rod_house_half, p.nose_swing_radius + c.nose_clearance
     with BuildSketch(mode=Mode.PRIVATE) as profile:
         insert(_lower_body_profile(p))
-        # Preserve the source's rectangular allowance toward -Y and -Z.
+        # Enlarge only the existing nose recess; its rear step stays at Y=h.
         with Locations((-reach, -reach)):
             Rectangle(h + reach, h + reach, align=(Align.MIN, Align.MIN))
         if c.bottom_clearance:
@@ -256,7 +258,9 @@ def _rod_slot_profile(p: LegParameters, c: CavityParameters) -> Face:
     return slot.face()
 
 
-def _cavity_tool(p: LegParameters, c: CavityParameters) -> Part:
+def _cavity_tool(
+    p: LegParameters, c: CavityParameters, rod_bumps: tuple[Part, ...] = (),
+) -> Part:
     """Extrude the clearance silhouette and add the two-sided rod insertion slot."""
     if c.slot_outer_radius(p.rod) >= c.slot_width(p.rod):
         raise ValueError("Rod slot outer radius must fit inside its width")
@@ -272,6 +276,8 @@ def _cavity_tool(p: LegParameters, c: CavityParameters) -> Part:
         with BuildSketch(Plane.YZ):
             insert(_rod_slot_profile(p, c))
         extrude(amount=rod_tool_length / 2, both=True)
+        for bump in rod_bumps:
+            insert(bump, mode=Mode.SUBTRACT)
 
     if tool.part_local is None or not tool.part_local.is_valid or len(tool.solids()) != 1:
         raise ValueError("Dimensions did not produce a single cavity tool")
@@ -279,7 +285,9 @@ def _cavity_tool(p: LegParameters, c: CavityParameters) -> Part:
     return tool.part_local
 
 
-def _housing_guide(p: LegParameters, c: CavityParameters, tool: Part) -> Part:
+def _housing_guide(
+    p: LegParameters, c: CavityParameters, tool: Part,
+) -> Part:
     """A simple symmetric material envelope, with the cavity already removed."""
     nose_reach = p.nose_swing_radius
     half_width = c.tool_length(p.rod) / 2 + c.rod_end_wall
@@ -374,11 +382,13 @@ class HingeLeg(Leg[HingeLegInstallation]):
         self, parameters: LegParameters = LegParameters(),
         cavity: CavityParameters = CavityParameters(),
         *, angular_range: tuple[float, float] = (-180, 180),
+        rod_retention: RodRetentionParameters | None = None,
     ) -> None:
         if not all(isfinite(a) for a in angular_range) or not angular_range[0] <= 0 <= angular_range[1]:
             raise ValueError("Angular range must be finite and include the neutral angle (0)")
+        self._rod_bumps = _rod_retention(parameters, cavity, rod_retention) if rod_retention else ()
         self._part = HingeLegPart(parameters)
-        self._tool = _cavity_tool(parameters, cavity)
+        self._tool = _cavity_tool(parameters, cavity, self._rod_bumps)
         self._housing = _housing_guide(parameters, cavity, self._tool)
         with BuildPart(mode=Mode.PRIVATE) as rod:
             Cylinder(parameters.rod.diameter / 2, parameters.rod.length, rotation=(0, 90, 0))
@@ -457,6 +467,10 @@ class HingeLeg(Leg[HingeLegInstallation]):
 
         local_placement = at * self.mount_joint.relative_location.inverse()
         placement = body.location * local_placement
+        for bump in self._rod_bumps:
+            required = bump.moved(placement)
+            if (required - body).volume > 1e-6:
+                raise ValueError("Rest must contain the retention bumps; retain the housing guide envelope")
         # Cut in the body's modeling frame; the builder restores its placement.
         with BuildPart(body.location, mode=Mode.PRIVATE) as installed:
             with Locations(body.location.inverse()):
@@ -470,16 +484,15 @@ class HingeLeg(Leg[HingeLegInstallation]):
         if body.volume - installed_body.volume < 1e-7:
             raise ValueError("Cavity tool does not intersect the rest")
 
-        return_body = copy(body)
         # Replace only the geometry, retaining the body's identity and attributes.
-        return_body.wrapped = installed_body.wrapped
+        body.wrapped = installed_body.wrapped
 
         mount_joint = RigidJoint(
             joint_label, body, placement * self._hinge.relative_axis.location,
         )
 
         return HingeLegInstallation(
-            body=return_body,
+            body=body,
             local_placement=local_placement,
             _mount_joint=mount_joint,
             _assembly=self._assembly,
@@ -493,9 +506,17 @@ def build_hinge_leg(
     parameters: LegParameters = LegParameters(),
     cavity: CavityParameters = CavityParameters(),
     *, angular_range: tuple[float, float] = (-180, 180),
+    rod_retention: RodRetentionParameters | None = None,
 ) -> HingeLeg:
-    """Build a hinge template with attachment angle limits in degrees."""
-    return HingeLeg(parameters, cavity, angular_range=angular_range)
+    """Build a hinge template with attachment angle limits in degrees.
+
+    Optional rod_retention adds solid bumps. CavityParameters.nose_clearance
+    enlarges the existing nose recess without changing the printed leg.
+    """
+    return HingeLeg(
+        parameters, cavity, angular_range=angular_range,
+        rod_retention=rod_retention,
+    )
 
 
 if __name__ == "__main__":
