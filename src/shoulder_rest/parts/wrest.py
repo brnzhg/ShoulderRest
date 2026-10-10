@@ -1,18 +1,12 @@
 from dataclasses import dataclass
 from math import cos, isfinite, radians, sin, tan
 
-from OCP.BRepAlgoAPI import BRepAlgoAPI_Cut
-from OCP.BRepBuilderAPI import BRepBuilderAPI_MakeShape
-from OCP.BRepFilletAPI import BRepFilletAPI_MakeFillet
-from OCP.Standard import Standard_Failure
-from OCP.StdFail import StdFail_NotDone
-from OCP.TopoDS import TopoDS
-
 from build123d import (
     BuildLine, BuildPart, BuildSketch, Compound, Edge, Face, GeomType, Location,
-    Mode, Part, Plane, Polyline, RigidJoint, Side, Vector, Wire,
+    Mode, Part, Plane, Polyline, RigidJoint, Side, Solid, Vector, Wire,
     extrude, fillet, insert, make_face,
 )
+from build123d.topology import ShapeHistory
 
 from shoulder_rest.parts.rest_geometry import RestGeometry
 from shoulder_rest.parts.shoulder import Shoulder
@@ -172,15 +166,14 @@ def _blank_from_centerline(centerline: Wire, p: WRestParameters) -> Part:
     return tail + head
 
 
-def _retained_faces(
-    operation: BRepBuilderAPI_MakeShape, sources: list[Face], result: Part,
-) -> list[Face]:
+def _retained_faces(sources: list[Face], result: Part | Solid) -> list[Face]:
     """Follow captured contact faces through a cut or fillet."""
-    candidates = []
-    for face in sources:
-        candidates.append(face)
-        candidates.extend(Face(TopoDS.Face_s(s)) for s in operation.Modified(face.wrapped))
-    return [f for f in result.faces() if any(f.is_same(c) for c in candidates)]
+    history = ShapeHistory.of(result)
+    if history is None:
+        raise ValueError("Cut or fillet must record contact-face history")
+    trace = history.trace(face.wrapped for face in sources)
+    return [face for face in result.faces()
+            if trace.is_untouched(face.wrapped) or trace.is_modified(face.wrapped)]
 
 
 def _shared_edges(first: list[Face], second: list[Face]) -> list[Edge]:
@@ -198,16 +191,13 @@ def _shared_edges(first: list[Face], second: list[Face]) -> list[Edge]:
 def _blend_cap_edges(
     body: Part, edges: list[Edge], radius: float, contact_faces: list[Face],
 ) -> tuple[Part, list[Face]]:
-    operation = BRepFilletAPI_MakeFillet(body.wrapped)
-    for edge in edges:
-        operation.Add(radius, edge.wrapped)
     try:
-        result = Part(operation.Shape())
-        if not result.is_valid or len(result.solids()) != 1:
-            raise ValueError("Cap blend must leave one valid head solid")
-    except (StdFail_NotDone, Standard_Failure) as error:
+        result = body.fillet(radius, edges)
+    except ValueError as error:
         raise ValueError("Cap blend failed; reduce blend_radius or adjust height/depth") from error
-    return result, _retained_faces(operation, contact_faces, result)
+    if not result.is_valid or len(result.solids()) != 1:
+        raise ValueError("Cap blend must leave one valid head solid")
+    return Part(result.solids()), _retained_faces(contact_faces, result)
 
 
 def _cap_head(
@@ -257,11 +247,10 @@ def _cap_head(
     if removed.bounding_box().max.Z >= -1e-6:
         raise ValueError("Cap cut reaches the mounting face; increase height or reduce angle/depth")
 
-    operation = BRepAlgoAPI_Cut(head.wrapped, cutter.part_local.wrapped)
-    result = Part(operation.Shape())
+    result = head - cutter.part_local
     if not result.is_valid or len(result.solids()) != 1:
         raise ValueError("Cap cut must leave one valid head solid")
-    contact_faces = _retained_faces(operation, contact_faces, result)
+    contact_faces = _retained_faces(contact_faces, result)
     if cap.blend_radius == 0:
         return result, contact_faces
 
@@ -287,13 +276,12 @@ def _contoured_head(
     head: Part, shoulder_tool: Compound,
 ) -> tuple[Part, list[Face]]:
     """Cut the shoulder contour and capture its contact faces for cap blends."""
-    # OCCT history captures the actual shoulder faces, including planar ones.
+    # Shape history captures the actual shoulder faces, including planar ones.
     # Keep this ancestry through the cap cuts instead of guessing by face type.
-    operation = BRepAlgoAPI_Cut(head.wrapped, shoulder_tool.wrapped)
-    result = Part(operation.Shape())
+    result = head - shoulder_tool
     if not result.is_valid or len(result.solids()) != 1:
         raise ValueError("Shoulder cut must leave one valid W head solid")
-    contact_faces = _retained_faces(operation, list(shoulder_tool.faces()), result)
+    contact_faces = _retained_faces(list(shoulder_tool.faces()), result)
     return result, contact_faces
 
 
