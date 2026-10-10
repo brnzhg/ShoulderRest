@@ -128,7 +128,7 @@ right_housing = rest.right.attach_housing_to(rest.assembly)
 
 Each attachment call adds and returns a fresh component, including when the destination is already positioned or nested. Repeating a call adds another component; it does not update an earlier one. Housing guides stay at the body site independently of leg angle. Attach to `rest.assembly` to have components follow the rest's subsequent movement. The descriptor holds references to mutable CAD objects but has no angle or attachment state. Its `housing` and `tool` properties also provide optional world-positioned snapshots. Both sides share one installation type parameter; mixing different installation types uses their common interface.
 
-If the geometry is already fitted to the shoulder and violin, its placement carries into `Rest` without another positioning step. Otherwise, position the violin first and call `rest.position_on(violin)`. All `position_on` methods move their receiver once, before scene nesting; call them again when their reference moves. Move `rest.assembly` to move the rest independently, keeping its children together.
+If the geometry's body is already positioned at its fitted pose, its placement carries into `Rest` without another positioning step. A body returned in its local frame needs `rest.position_on(violin)` after positioning the violin. All `position_on` methods move their receiver once, before scene nesting; call them again when their reference moves. Move `rest.assembly` to move the rest independently, keeping its children together.
 
 Custom outlines can subclass `ViolinOutline` to inherit `position_on(shoulder)`. Custom rest geometry only needs to provide the body and three attachment properties, either by subclassing `RestGeometry` or satisfying it structurally. `Rest` provides placement of the completed assembly.
 
@@ -150,6 +150,22 @@ rest.right.attach_to(rest.assembly)
 ```
 
 The other half stays at the base bar thickness. `contact_side="left"` selects the opposite half; `contact_depth` is the total blank depth below the leg mounting face, in mm. Width, thickness, attachment fractions, and violin gap use the same parameters as the simple bar. Adjust the shoulder's violin placement to change the fit, then rebuild the geometry and rest. Preview the example with `uv run python -m shoulder_rest.parts.contoured_rest`.
+
+`WRestGeometry` in `parts/wrest.py` fits a wider head along three W strokes while keeping the leftmost stroke as a thin tail. `WRestParameters.tail_width` is the tail's total width; `tail_thickness` is its depth. `head_front_width` and `head_back_width` are independent offsets from the centerline, and `head_depth` sets the head's oversized depth before the shoulder cut. Front is the lower-Y side of a leftward stroke. Construct it with `WRestGeometry(violin, shoulder, parameters)` to inspect `geometry.part` in violin-local XY. After passing it to `Rest`, call `rest.position_on(violin)` before scene nesting to place the assembly at the fitted pose. See the [rest spec](specs/rest_spec.md#w-rest-geometry) for the head/tail transition and mount frames. Preview with `uv run python -m shoulder_rest.parts.wrest`.
+
+Optionally trim either head end with independent `WHeadCapParameters`, after the shoulder cut. Height is measured from the mounting face toward the shoulder; positive angle slopes the front toward -Z relative to the back:
+
+```python
+from shoulder_rest.parts.wrest import WHeadCapParameters, WRestGeometry, WRestParameters
+
+parameters = WRestParameters(
+    left_cap=WHeadCapParameters(angle=8, height=16, depth=18, blend_radius=1),
+    right_cap=WHeadCapParameters(angle=15, height=14, depth=20, blend_radius=1),
+)
+geometry = WRestGeometry(violin, shoulder, parameters)
+```
+
+Both caps default to `None`. Inspect the fit after adjusting the cap dimensions or shoulder placement.
 
 ## Repository layout
 

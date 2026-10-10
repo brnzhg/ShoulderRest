@@ -8,8 +8,9 @@ from build123d import Part, RigidJoint
 class RestGeometry(Protocol):
     """A finished, un-nested Part containing one solid and three distinct joints.
 
-    The body's location records its intended placement relative to the shoulder
-    and violin. Implementations may position reference parts and subtract the
+    The body may remain in its local modeling frame or carry a fitted pose.
+    A local body is positioned through Rest.position_on(violin) after assembly.
+    Implementations may position reference parts and subtract the
     shoulder before defining these joints on the final body. Joint labels are
     implementation details; consumers use the typed properties.
     Passing this geometry to Rest transfers its body for construction and
@@ -22,7 +23,7 @@ class RestGeometry(Protocol):
 
     @property
     def part(self) -> Part:
-        """Finished body before leg cuts, at its intended placement."""
+        """Finished body before leg cuts, local or already at its fitted pose."""
         ...
 
     @property

@@ -2,7 +2,7 @@
 
 `parts/rest_geometry.py` defines the `RestGeometry` protocol. Its four properties are:
 
-- `part`: a finished, un-nested, `Part` containing one solid before leg cuts. Its location records the intended pose relative to the shoulder and violin.
+- `part`: a finished, un-nested, `Part` containing one solid before leg cuts. It may remain in its local modeling frame or already carry its fitted pose.
 - `left_mount_joint`, `right_mount_joint`: rigid installation joints registered on `part`. Mount X follows the rod; mount Z points into the material.
 - `violin_joint`: a rigid joint registered on the same `part`, defining its violin attachment, including any spacing and tilt.
 
@@ -73,8 +73,22 @@ Preview: `uv run python -m shoulder_rest.parts.contoured_rest`.
 
 ## W rest geometry
 
-`parts/wrest.py` builds a W centerline in the violin's local XY plane from the right attachment toward the left. `w1`, `w2`, and `w3` are the lengths of its three middle strokes. Each signed angle is an absolute offset from `(-1, 0)`, independent of the preceding stroke: zero points left, positive slopes down, and negative slopes up. The current defaults make the first stroke slope down, the second slope up, and the third run horizontally left. A final straight stroke reaches the left attachment. `right_extend` continues the first stroke past the right attachment, and `left_extend` continues the final stroke past the left attachment.
+`parts/wrest.py` builds a W centerline in the violin's local XY plane from the right attachment toward the left. `w1`, `w2`, and `w3` are the lengths of its three middle strokes. Each signed angle is an absolute offset from `(-1, 0)`, independent of the preceding stroke: zero points left, positive slopes down, and negative slopes up. A final straight stroke reaches the left attachment. `right_extend` continues the first stroke past the right attachment, and `left_extend` continues the final stroke past the left attachment.
 
-`first_radius`, `second_radius`, and `third_radius` round the three centerline bends in travel order. Each can differ; zero keeps a sharp bend. The attachments lie on straight portions of the outer strokes. The centerline is offset by half `tail_thickness` on both sides, capped, and extruded below Z=0 by `tail_thickness`.
+`first_radius`, `second_radius`, and `third_radius` round the three centerline bends in travel order. Each can differ; zero keeps a sharp bend. The attachments lie on straight portions of the outer strokes.
 
-`WRestGeometry` places the violin on the shoulder, cuts the W blank in its local frame, and creates both leg mounts on the finished body. Each mount sits at its respective violin attachment point on Z=0. Its X direction is perpendicular to that side's outward centerline tangent, matching the rod direction used by the straight bar; its Z direction points into the body. The two X directions differ because the outer strokes have different angles. The violin joint and both leg mounts belong to the fitted body.
+The final straight stroke is the tail: a rounded bar with total width `tail_width`, extruded from Z=0 to `-tail_thickness`. The head contains the remaining strokes and the joining fillet. Its front and back boundaries are offset from the centerline by `head_front_width` and `head_back_width`, respectively, with straight closing ends. Front is the left side of the right-to-left path, usually lower Y; back is the right side, usually upper Y. `head_depth` is the total oversized head depth below Z=0 and must exceed `tail_thickness`.
+
+`WRestGeometry` places the violin on the shoulder, cuts only the head with `shoulder.extended` in the blank's local frame, then joins the untouched tail. The two footprints overlap at the joining fillet's end. Inspect the fit where the head extends beyond the shoulder cutter: material outside its footprint retains the full oversized depth.
+
+Both leg mounts are created on the finished body at their respective violin attachment points on Z=0 (left fraction 0.46, right fraction 0.4). Mount X is perpendicular to that side's outward centerline tangent, matching the rod direction used by the straight bar; mount Z points into the body. The two X directions differ because the outer strokes have different angles. The violin joint and both leg mounts belong to the body, which stays in violin-local XY for inspection. `Rest` installs the legs using those local frames; `rest.position_on(violin)` then connects the assembly's violin joint and moves the whole rest to the fitted pose. Call it before nesting the rest and violin in a scene.
+
+### Optional head caps
+
+`WRestParameters.left_cap` and `right_cap` accept separate frozen `WHeadCapParameters` instances; `None` disables that end. The left head end is the transition to the tail, after the third centerline fillet. The right head end is the extended tip of the first stroke. Caps are applied after shoulder contouring and before joining the tail.
+
+Each cap defines `angle` (default 10°), `height` (12 mm), `depth` (20 mm), and `blend_radius` (1 mm). Its end-face line passes through the end centerline at Z=`-height`. At signed distance `s` toward the front, it is Z=`-height - s*tan(angle)`. Thus zero is parallel to the Z=0 bottom segment, and a positive angle places the front at a more negative Z than the back. The angle must be strictly between -90° and 90°, and the line and cut must stay clear of the mounting face.
+
+The cutting plane contains that line and the head's inward end tangent; its normal lies in the end face. A straight extrusion removes material toward -Z for the fixed `depth`, measured along that tangent. This uses the local tangent at the rounded head/tail transition on the left. The cut can create a step at its depth limit. Fillets round both the cap-to-step join and the step-to-shoulder join, or the direct cap-to-shoulder intersection when the planes meet without a step. Shoulder faces are captured from the contouring operation and followed through subsequent cuts and fillets. The tail is added afterward.
+
+Setting `blend_radius=0` leaves sharp cuts for inspection. A cap that misses the head, reaches Z=0, disconnects the head, has no shoulder join to blend, or cannot accommodate the requested radius raises an error identifying the end. Adjust the dimensions and inspect the CAD preview; the radius is not reduced automatically.
