@@ -59,8 +59,16 @@ Preview: `uv run python -m shoulder_rest.parts.simple_rest`.
 
 `ContouredRestParameters` extends `SimpleRestParameters` with `contact_depth=80` mm and `contact_side="right"`. The whole slot footprint is extruded to the base thickness. A plane through the midpoint, perpendicular to the line between leg centers, divides the footprint into equal halves. The selected half is extruded from Z=0 to `-contact_depth` and united with the bar.
 
-The blank receives a violin joint through `violin.add_mount_joint(blank, offset=Location((0, 0, violin_gap)))`. Connecting `violin.mount_joint` to this joint establishes the fitted pose. A private `BuildPart(pose)` inserts the blank at the local origin and subtracts `shoulder.extended` transformed into that same local frame. The builder returns a fresh body at the fitted pose without the blank's joint metadata. All three joints are created on that final body. Passing it to `Rest` retains this fit without `rest.position_on(...)`.
+The blank receives a violin joint through `violin.add_mount_joint(blank, offset=Location((0, 0, violin_gap)))`. Connecting `violin.mount_joint` to this joint establishes the fitted pose. A private `BuildPart` inserts the blank at the local origin and subtracts `shoulder.extended` transformed into that same local frame. All three joints are created on the cut body in local coordinates, then the body is placed at the fitted pose. Passing it to `Rest` retains this fit without `rest.position_on(...)`.
 
 The cut must remove material and leave one valid solid. The example's right half is fully trimmed by the shoulder surface; other placements or dimensions can leave an untrimmed end or cut into the mounting region. Inspect the preview after changes. This is a contouring example, without padding allowance or automatic leg-housing protection. Rebuild after changing the fit; moving the assembled rest does not recompute its contour.
 
 Preview: `uv run python -m shoulder_rest.parts.contoured_rest`.
+
+## W rest geometry
+
+`parts/wrest.py` builds a W centerline in the violin's local XY plane from the right attachment toward the left. `w1`, `w2`, and `w3` are the lengths of its three middle strokes. Each signed angle is an absolute offset from `(-1, 0)`, independent of the preceding stroke: zero points left, positive slopes down, and negative slopes up. The current defaults make the first stroke slope down, the second slope up, and the third run horizontally left. A final straight stroke reaches the left attachment. `right_extend` continues the first stroke past the right attachment, and `left_extend` continues the final stroke past the left attachment.
+
+`first_radius`, `second_radius`, and `third_radius` round the three centerline bends in travel order. Each can differ; zero keeps a sharp bend. The attachments lie on straight portions of the outer strokes. The centerline is offset by half `tail_thickness` on both sides, capped, and extruded below Z=0 by `tail_thickness`.
+
+`WRestGeometry` places the violin on the shoulder, cuts the W blank in its local frame, and creates both leg mounts on the finished body. Each mount sits at its respective violin attachment point on Z=0. Its X direction is perpendicular to that side's outward centerline tangent, matching the rod direction used by the straight bar; its Z direction points into the body. The two X directions differ because the outer strokes have different angles. The violin joint and both leg mounts belong to the fitted body.

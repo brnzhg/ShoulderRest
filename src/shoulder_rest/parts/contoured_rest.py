@@ -80,11 +80,11 @@ class ContouredRestGeometry(RestGeometry):
         violin.mount_joint.connect_to(blank_joint)
         pose = Location(blank.location)
 
-        # Build locally; the builder places the finished body at the fitted pose.
-        with BuildPart(pose, mode=Mode.PRIVATE) as contoured:
+        # Cut in the blank's local frame; place the finished body after adding joints.
+        with BuildPart(mode=Mode.PRIVATE) as contoured:
             insert(blank.located(Location()))
             insert(shoulder.extended.moved(pose.inverse()), mode=Mode.SUBTRACT)
-        body = contoured.part
+        body = contoured.part_local
         assert body is not None
         if not body.is_valid or len(body.solids()) != 1:
             raise ValueError("Shoulder cut must leave one solid; adjust the fit or contact depth")
@@ -98,15 +98,16 @@ class ContouredRestGeometry(RestGeometry):
         across = Vector(-direction.Y, direction.X, 0)
         self._left_mount_joint = RigidJoint(
             "left_mount", self._part,
-            pose * Location(Plane(origin=left, x_dir=across, z_dir=(0, 0, -1))),
+            Location(Plane(origin=left, x_dir=across, z_dir=(0, 0, -1))),
         )
         self._right_mount_joint = RigidJoint(
             "right_mount", self._part,
-            pose * Location(Plane(origin=right, x_dir=-across, z_dir=(0, 0, -1))),
+            Location(Plane(origin=right, x_dir=-across, z_dir=(0, 0, -1))),
         )
         self._violin_joint = violin.add_mount_joint(
             self._part, offset=Location((0, 0, p.violin_gap)),
         )
+        self._part.locate(pose)
 
     @property
     def part(self) -> Part:
