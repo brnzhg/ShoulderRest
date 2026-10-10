@@ -76,3 +76,21 @@ The reusable Kun profiles return fresh `Face` objects: `screw_hole_face(kun)` li
 The leg with `rod_bore_clearance=0.2` and the default cutter match their Onshape solids by volume and two-way Boolean difference. The current leg default uses 0.3 mm bore clearance.
 
 Preview: `uv run python -m shoulder_rest.parts.leg.hinge_leg`. Tests: `uv run python -m unittest discover -s tests`.
+
+## Optional rod retention
+
+`build_hinge_leg(..., rod_retention=RodRetentionParameters())` retains two solid rounded ribs on the +Z walls of the rod channels (their ceilings in the source modeling frame). The option defaults to `None`; parameters are available from `hinge_leg` and private builders live in `hinge_snaps.py`. Installation checks that the receiving body contains the bumps and leaves one connected solid.
+
+Each bump is 0.8 mm wide along X, with a 0.45 mm radius centered at Y=0.75 mm, midway along each rod overhang. Both diamond bearing faces and the axial end walls remain intact. `interference=0.10` sets a 1.90 mm throat for the 2 mm rod. The bumps project 0.20 mm toward -Z into the original 2.10 mm channel. The seated rod clears them; reverse travel encounters them after approximately 0.11 mm at nominal Z=0.
+
+The rest's flat mounting face is always printed against the bed. In the hinge source frame that face is Z=`rod_house_half` (+3.1 mm by default), with source +Z pointing toward the bed. The channel's +Z wall therefore becomes its printed floor, supporting the bumps as they grow upward. The coupon STL is flipped 180° about X and placed on the bed; STEP files and previews retain the source modeling pose. The separate leg STL is printed on its broad side. See the [rest print convention](rest_spec.md#print-orientation).
+
+This is a local deformation fit. Insertion force, wear and retention require a PETG print trial; tune interference in approximately 0.05 mm steps. `uv run python examples/hinge_snaps.py --export` writes the housing coupon, original leg and assembly to `exports/hinge_snaps/`. There are no added angular detents, springs, foam pockets or foam components.
+
+## Nose recess clearance
+
+`CavityParameters(nose_clearance=0.2)` enlarges the existing rectangular nose allowance by 0.2 mm toward both -Y and -Z. The default is zero. Its rear step stays at Y=`rod_house_half` before the general fit offset; the raised rear cavity floor, printed leg, rod seats and mounting frame stay unchanged. The allowance has the full cavity width. This single dimension can provide extra space for a user-cut piece of thin foam without modeling a separate pocket or changing the leg.
+
+With `h = rod_house_half`, `r = nose_swing_radius`, and `n = nose_clearance`, the nose floor is at Z=`-r - n - bottom_clearance - clearance`; the rear floor is at Z=`-h - bottom_clearance - clearance`. Their level difference is `r - h + n`. The nose wall is at Y=`-r - n - clearance`.
+
+For the original 6.2 mm hinge block, the default step is about 0.663 mm. Adding 0.2 mm makes the step about 0.863 mm and lowers the nose floor from Z=-3.963 to -4.163 mm. The housing guide remains Z=-5.1 to +3.1 mm, leaving about 0.937 mm under the enlarged recess. Its outside dimensions do not grow; additional clearance consumes front and bottom wall material. Settings that cut through the guide are rejected. Check actual remaining material in the final rest and choose the clearance for the foam's compressed fit; this parameter does not prescribe foam thickness or detent force.

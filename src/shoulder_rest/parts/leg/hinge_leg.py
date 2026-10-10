@@ -4,7 +4,7 @@ The rod axis is X through the origin. The nut housing extends toward +Y;
 the screw runs along Z. Lengths are in millimeters and angles in degrees.
 """
 
-from copy import deepcopy, copy
+from copy import deepcopy
 from dataclasses import dataclass, fields
 from math import isfinite, radians, sqrt, tan
 
@@ -17,6 +17,7 @@ from build123d import (
 
 from shoulder_rest.parts.kun import KunParameters, nut_slot_face, screw_hole_face
 from .leg import Leg
+from .hinge_snaps import RodRetentionParameters, _rod_retention
 
 
 @dataclass(frozen=True)
@@ -53,13 +54,14 @@ class LegParameters:
             raise ValueError("Sizes must be positive; clearances, gaps and chamfer may be zero")
         if not 0 < self.rear_relief_angle < 90:
             raise ValueError("Relief angle must be between 0 and 90 degrees")
-        if self.nose_radius >= self.rod_half or self.rod_hole_diameter >= self.rod_house_length:
+        if self.nose_radius >= self.rod_house_half or self.rod_hole_diameter >= self.rod_house_length:
             raise ValueError("Nose radius and rod bore must fit inside the rod housing")
         if self.rod.length <= self.width:
             raise ValueError("Metal rod must extend beyond both sides of the printed leg")
         if self.edge_chamfer >= min(self.width / 2, self.wall, self.nose_radius):
             raise ValueError("Chamfer is too large for the housing")
         k = self.kun
+        # check teardrop tip is within part with chamfer
         roof_x = k.screw_circle_offset - k.screw_diameter / 2 - k.screw_roof_extension
         if max(abs(roof_x), k.screw_flat_half_height) >= self.width / 2 - self.edge_chamfer:
             raise ValueError("Screw opening must fit between the side faces")
@@ -67,39 +69,36 @@ class LegParameters:
     @property
     def nose_swing_radius(self) -> float:
         """Maximum distance from the hinge axis to the rounded nose."""
-        return sqrt(2) * (self.rod_half - self.nose_radius) + self.nose_radius
+        return sqrt(2) * (self.rod_house_half - self.nose_radius) + self.nose_radius
 
     @property
     def rod_hole_diameter(self) -> float:
         return self.rod.diameter + self.rod_bore_clearance
 
-    # TODO probably add _y to this. Consider removing, not the most intuitive property
     @property
-    def housing_start(self) -> float:
-        return self.rod_half + self.housing_gap
+    def housing_start_y(self) -> float:
+        return self.rod_house_half + self.housing_gap
 
-    # TODO get rid of this, bad name (omits "house") and questionable utility
-    # constructions using this should probably be refactored to be clearer
     @property
-    def rod_half(self) -> float:
+    def rod_house_half(self) -> float:
         return self.rod_house_length / 2
 
     @property
     def screw_y(self) -> float:
-        return self.housing_start + self.wall + self.kun.nut_slot_width / 2
+        return self.housing_start_y + self.wall + self.kun.nut_slot_width / 2
 
     @property
     def rear_y(self) -> float:
-        return self.housing_start + 2 * self.wall + self.kun.nut_slot_width
+        return self.housing_start_y + 2 * self.wall + self.kun.nut_slot_width
 
     @property
     def top_z(self) -> float:
-        return self.rod_half + self.kun.nut_slot_height + self.wall
+        return self.rod_house_half + self.kun.nut_slot_height + self.wall
 
 
 def _lower_body_profile(p: LegParameters) -> Face:
     """Shared side profile in sketch XY (horizontal=body Y, vertical=body Z)."""
-    h = p.rod_half
+    h = p.rod_house_half
     relief_width = h * tan(radians(p.rear_relief_angle))
     with BuildSketch(mode=Mode.PRIVATE) as profile:
         with Locations((-h, 0)):
@@ -116,9 +115,9 @@ def _lower_body_profile(p: LegParameters) -> Face:
 def _nut_housing_profile(p: LegParameters) -> Face:
     """Raised housing in the same sketch frame as the lower body."""
     with BuildSketch(mode=Mode.PRIVATE) as profile:
-        with Locations((p.housing_start, p.rod_half)):
+        with Locations((p.housing_start_y, p.rod_house_half)):
             Rectangle(
-                p.rear_y - p.housing_start, p.top_z - p.rod_half,
+                p.rear_y - p.housing_start_y, p.top_z - p.rod_house_half,
                 align=(Align.MIN, Align.MIN),
             )
     return profile.face()
@@ -126,10 +125,7 @@ def _nut_housing_profile(p: LegParameters) -> Face:
 
 def _body_profile(p: LegParameters) -> Face:
     """Combine the shared lower body and raised nut housing."""
-    with BuildSketch(mode=Mode.PRIVATE) as profile:
-        insert(_lower_body_profile(p))
-        insert(_nut_housing_profile(p))
-    return profile.face()
+    return _lower_body_profile(p) + _nut_housing_profile(p)
 
 
 class HingeLegPart(Part):
@@ -155,21 +151,21 @@ class HingeLegPart(Part):
 
             Cylinder(p.rod_hole_diameter / 2, p.width, rotation=(0, 90, 0), mode=Mode.SUBTRACT)
             nut_face = nut_slot_face(p.kun).moved(Location(
-                (0, p.screw_y, p.rod_half + p.kun.nut_slot_height / 2)
+                (0, p.screw_y, p.rod_house_half + p.kun.nut_slot_height / 2)
             ))
             extrude(nut_face, amount=p.width / 2, both=True, dir=(1, 0, 0), mode=Mode.SUBTRACT)
-            with BuildSketch(Plane.XY.offset(-p.rod_half)):
+            with BuildSketch(Plane.XY.offset(-p.rod_house_half)):
                 with Locations((0, p.screw_y)):
                     insert(screw_hole_face(p.kun))
-            extrude(amount=p.top_z + p.rod_half, mode=Mode.SUBTRACT)
+            extrude(amount=p.top_z + p.rod_house_half, mode=Mode.SUBTRACT)
 
         if body.part_local is None or not body.part_local.is_valid or len(body.solids()) != 1:
             raise ValueError("Dimensions did not produce a single valid leg housing")
         super().__init__(body.part_local.wrapped, label="Hinge slot leg")
 
         self._rod_joint = RigidJoint("rod", self, Location(Plane(origin=(0, 0, 0), z_dir=(1, 0, 0))))
-        self._screw_joint = RigidJoint("screw", self, Location((0, p.screw_y, -p.rod_half)))
-        self._nut_joint = RigidJoint("nut", self, Location((0, p.screw_y, p.rod_half)))
+        self._screw_joint = RigidJoint("screw", self, Location((0, p.screw_y, -p.rod_house_half)))
+        self._nut_joint = RigidJoint("nut", self, Location((0, p.screw_y, p.rod_house_half)))
 
     @property
     def rod_joint(self) -> RigidJoint:
@@ -193,6 +189,7 @@ class CavityParameters:
 
     clearance: float = 0.1
     bottom_clearance: float = 0.1
+    nose_clearance: float = 0.0  # Extra room toward -Y and -Z in the nose recess.
     rod_slot_clearance: float = 0.1  # Added to the rod diameter.
     rod_slot_run: float = 3.0
     rod_slot_inner_radius: float = 0.2
@@ -205,7 +202,7 @@ class CavityParameters:
         if any(not isfinite(getattr(self, f.name)) for f in fields(self)):
             raise ValueError("Cavity dimensions must be finite")
         if min(
-            self.clearance, self.bottom_clearance, self.rod_slot_clearance,
+            self.clearance, self.bottom_clearance, self.nose_clearance, self.rod_slot_clearance,
             self.rod_slot_radius_clearance, self.rod_length_clearance,
         ) < 0 or min(
             self.rod_slot_run, self.rod_slot_inner_radius,
@@ -225,10 +222,10 @@ class CavityParameters:
 
 def _cavity_profile(p: LegParameters, c: CavityParameters) -> Face:
     """Shared lower profile with nose swing allowance, underside relief and fit."""
-    h, reach = p.rod_half, p.nose_swing_radius
+    h, reach = p.rod_house_half, p.nose_swing_radius + c.nose_clearance
     with BuildSketch(mode=Mode.PRIVATE) as profile:
         insert(_lower_body_profile(p))
-        # Preserve the source's rectangular allowance toward -Y and -Z.
+        # Enlarge only the existing nose recess; its rear step stays at Y=h.
         with Locations((-reach, -reach)):
             Rectangle(h + reach, h + reach, align=(Align.MIN, Align.MIN))
         if c.bottom_clearance:
@@ -250,25 +247,26 @@ def _rod_slot_profile(p: LegParameters, c: CavityParameters) -> Face:
             Rectangle(width / sqrt(2), width / sqrt(2), rotation=45)
             Rectangle(c.rod_slot_run + width, width, align=(Align.MIN, Align.CENTER))
         with Locations((entry_x, -half_width)):
-            Rectangle(width, p.rod_half + half_width, align=(Align.MIN, Align.MIN))
+            Rectangle(width, p.rod_house_half + half_width, align=(Align.MIN, Align.MIN))
 
         # Ease the inside and outside corners where the entry turns into the channel.
-        for x, y, radius in (
-            (entry_x, half_width, c.rod_slot_inner_radius),
-            (entry_x + width, -half_width, c.slot_outer_radius(p.rod)),
-        ):
-            corners = [v for v in slot.vertices() if abs(v.X - x) < 1e-7 and abs(v.Y - y) < 1e-7]
-            fillet(corners, radius)
+        inner_corner = slot.vertices().sort_by_distance((entry_x, half_width))[0]
+        fillet(inner_corner, c.rod_slot_inner_radius)
+
+        outer_corner = slot.vertices().sort_by_distance((entry_x + width, -half_width))[0]
+        fillet(outer_corner, c.slot_outer_radius(p.rod))
     return slot.face()
 
 
-def _cavity_tool(p: LegParameters, c: CavityParameters) -> Part:
+def _cavity_tool(
+    p: LegParameters, c: CavityParameters, rod_bumps: tuple[Part, ...] = (),
+) -> Part:
     """Extrude the clearance silhouette and add the two-sided rod insertion slot."""
     if c.slot_outer_radius(p.rod) >= c.slot_width(p.rod):
         raise ValueError("Rod slot outer radius must fit inside its width")
     width = p.width + 2 * c.clearance
-    rod_length = c.tool_length(p.rod)
-    if rod_length <= width:
+    rod_tool_length = c.tool_length(p.rod)
+    if rod_tool_length <= width:
         raise ValueError("Rod must extend beyond both sides of the leg cavity")
 
     with BuildPart(mode=Mode.PRIVATE) as tool:
@@ -277,7 +275,9 @@ def _cavity_tool(p: LegParameters, c: CavityParameters) -> Part:
         extrude(amount=width / 2, both=True)
         with BuildSketch(Plane.YZ):
             insert(_rod_slot_profile(p, c))
-        extrude(amount=rod_length / 2, both=True)
+        extrude(amount=rod_tool_length / 2, both=True)
+        for bump in rod_bumps:
+            insert(bump, mode=Mode.SUBTRACT)
 
     if tool.part_local is None or not tool.part_local.is_valid or len(tool.solids()) != 1:
         raise ValueError("Dimensions did not produce a single cavity tool")
@@ -285,19 +285,21 @@ def _cavity_tool(p: LegParameters, c: CavityParameters) -> Part:
     return tool.part_local
 
 
-def _housing_guide(p: LegParameters, c: CavityParameters, tool: Part) -> Part:
+def _housing_guide(
+    p: LegParameters, c: CavityParameters, tool: Part,
+) -> Part:
     """A simple symmetric material envelope, with the cavity already removed."""
     nose_reach = p.nose_swing_radius
     half_width = c.tool_length(p.rod) / 2 + c.rod_end_wall
     front = -nose_reach - c.housing_wall
     rear = p.rear_y + c.housing_wall
-    bottom = -p.rod_half - c.housing_wall
+    bottom = -p.rod_house_half - c.housing_wall
     if bottom >= tool.bounding_box().min.Z or front >= tool.bounding_box().min.Y:
         raise ValueError("Housing wall must extend beyond the cavity's bottom and nose")
     with BuildPart(mode=Mode.PRIVATE) as guide:
         with Locations((-half_width, front, bottom)):
             Box(
-                2 * half_width, rear - front, p.rod_half - bottom,
+                2 * half_width, rear - front, p.rod_house_half - bottom,
                 align=(Align.MIN, Align.MIN, Align.MIN),
             )
         insert(tool, mode=Mode.SUBTRACT)
@@ -380,11 +382,13 @@ class HingeLeg(Leg[HingeLegInstallation]):
         self, parameters: LegParameters = LegParameters(),
         cavity: CavityParameters = CavityParameters(),
         *, angular_range: tuple[float, float] = (-180, 180),
+        rod_retention: RodRetentionParameters | None = None,
     ) -> None:
         if not all(isfinite(a) for a in angular_range) or not angular_range[0] <= 0 <= angular_range[1]:
             raise ValueError("Angular range must be finite and include the neutral angle (0)")
+        self._rod_bumps = _rod_retention(parameters, cavity, rod_retention) if rod_retention else ()
         self._part = HingeLegPart(parameters)
-        self._tool = _cavity_tool(parameters, cavity)
+        self._tool = _cavity_tool(parameters, cavity, self._rod_bumps)
         self._housing = _housing_guide(parameters, cavity, self._tool)
         with BuildPart(mode=Mode.PRIVATE) as rod:
             Cylinder(parameters.rod.diameter / 2, parameters.rod.length, rotation=(0, 90, 0))
@@ -408,7 +412,7 @@ class HingeLeg(Leg[HingeLegInstallation]):
             self._part.nut_joint.label, self._assembly, self._part.nut_joint.location,
         )
         self._mount_joint = RigidJoint("mount", self._assembly, Location(Plane(
-            origin=(0, parameters.screw_y, parameters.rod_half),
+            origin=(0, parameters.screw_y, parameters.rod_house_half),
             x_dir=(1, 0, 0), z_dir=(0, 0, -1),
         )))
 
@@ -463,6 +467,10 @@ class HingeLeg(Leg[HingeLegInstallation]):
 
         local_placement = at * self.mount_joint.relative_location.inverse()
         placement = body.location * local_placement
+        for bump in self._rod_bumps:
+            required = bump.moved(placement)
+            if (required - body).volume > 1e-6:
+                raise ValueError("Rest must contain the retention bumps; retain the housing guide envelope")
         # Cut in the body's modeling frame; the builder restores its placement.
         with BuildPart(body.location, mode=Mode.PRIVATE) as installed:
             with Locations(body.location.inverse()):
@@ -476,16 +484,15 @@ class HingeLeg(Leg[HingeLegInstallation]):
         if body.volume - installed_body.volume < 1e-7:
             raise ValueError("Cavity tool does not intersect the rest")
 
-        return_body = copy(body)
         # Replace only the geometry, retaining the body's identity and attributes.
-        return_body.wrapped = installed_body.wrapped
+        body.wrapped = installed_body.wrapped
 
         mount_joint = RigidJoint(
             joint_label, body, placement * self._hinge.relative_axis.location,
         )
 
         return HingeLegInstallation(
-            body=return_body,
+            body=body,
             local_placement=local_placement,
             _mount_joint=mount_joint,
             _assembly=self._assembly,
@@ -499,9 +506,17 @@ def build_hinge_leg(
     parameters: LegParameters = LegParameters(),
     cavity: CavityParameters = CavityParameters(),
     *, angular_range: tuple[float, float] = (-180, 180),
+    rod_retention: RodRetentionParameters | None = None,
 ) -> HingeLeg:
-    """Build a hinge template with attachment angle limits in degrees."""
-    return HingeLeg(parameters, cavity, angular_range=angular_range)
+    """Build a hinge template with attachment angle limits in degrees.
+
+    Optional rod_retention adds solid bumps. CavityParameters.nose_clearance
+    enlarges the existing nose recess without changing the printed leg.
+    """
+    return HingeLeg(
+        parameters, cavity, angular_range=angular_range,
+        rod_retention=rod_retention,
+    )
 
 
 if __name__ == "__main__":

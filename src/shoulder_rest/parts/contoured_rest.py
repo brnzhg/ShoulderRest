@@ -134,6 +134,7 @@ if __name__ == "__main__":
     from shoulder_rest.parts.rest import Rest
     from shoulder_rest.parts.shoulder.step_shoulder import load_shoulder_cast
     from shoulder_rest.parts.violin_outline.spline_violin_outline import build_violin_outline
+    from shoulder_rest.parts.leg.hinge_snaps import RodRetentionParameters
 
     shoulder = load_shoulder_cast(
         cast_location=Location((0, 0, 0), (30, 30, -5)),
@@ -146,7 +147,7 @@ if __name__ == "__main__":
     )
     violin = build_violin_outline()
     geometry = ContouredRestGeometry(violin, shoulder)
-    rest = Rest(geometry, build_hinge_leg())
+    rest = Rest(geometry, build_hinge_leg(rod_retention=RodRetentionParameters()))
     scene = Compound(label="Contoured rest fitting", children=[
         shoulder.assembly, violin.block, rest.assembly,
     ])
