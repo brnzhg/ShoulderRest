@@ -32,7 +32,7 @@ class WHeadCapParameters:
     angle: float = 10
     height: float = 12
     depth: float = 20
-    blend_radius: float = 1
+    blend_radius: float = 10
 
     def __post_init__(self) -> None:
         if not isfinite(self.angle) or not -90 < self.angle < 90:
@@ -396,6 +396,7 @@ if __name__ == "__main__":
     from ocp_vscode import show
 
     from shoulder_rest.parts.leg.hinge_leg import build_hinge_leg
+    from shoulder_rest.parts.leg.hinge_snaps import RodRetentionParameters
     from shoulder_rest.parts.rest import Rest
     from shoulder_rest.parts.shoulder.step_shoulder import load_shoulder_cast
     from shoulder_rest.parts.violin_outline.spline_violin_outline import build_violin_outline
@@ -414,8 +415,8 @@ if __name__ == "__main__":
         left_cap=WHeadCapParameters(angle=24, height=34, depth=30),
         right_cap=WHeadCapParameters(angle=10, height=30, depth=20),
     ))
-    show(geometry.part)  # Inspect the local body before assembling it.
-    rest = Rest(geometry, build_hinge_leg())
+    #show(geometry.part)  # Inspect the local body before assembling it.
+    rest = Rest(geometry, build_hinge_leg(rod_retention=RodRetentionParameters()))
     rest.position_on(violin)
 
     scene = Compound(label="WRest fitting", children=[
@@ -425,4 +426,4 @@ if __name__ == "__main__":
     rest.right.attach_to(rest.assembly)
     rest.left.attach_housing_to(rest.assembly)
     rest.right.attach_housing_to(rest.assembly)
-    #show(scene)
+    show(scene)
