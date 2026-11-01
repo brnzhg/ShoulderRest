@@ -1,6 +1,6 @@
 # Project context
 
-This is a Python CAD project using build123d, managed by uv. Read [README.md](README.md) for the public interfaces, modeling workflow, and setup. `Shoulder`, `ViolinOutline`, `Leg`, and `RestGeometry` feed `Rest`, which assembles a fitted rest. Consult the relevant file in `specs/` before changing geometry or coordinate conventions.
+This is a Python CAD project using build123d, managed by uv. Read [README.md](README.md) for the public interfaces, modeling workflow, and setup. `Shoulder`, `ViolinOutline`, `Leg`, and `RestGeometry` feed `Rest`, which assembles a fitted rest. Read the docstrings of the modules involved before changing geometry or coordinate conventions.
 
 ## Modeling and code style
 
@@ -27,5 +27,5 @@ Run `uv run python -m unittest discover -s tests` and `uv run mypy src tests exa
 
 ## Documentation
 
-- Keep README.md focused on using the interfaces and assembling a rest. Put contributor instructions here and detailed feature geometry or implementation decisions in `specs/`.
-- Keep documentation brief. README.md and code comments describe the current state, not the history of edits. Record change history in `changelog/` or the relevant specification when useful.
+- Keep README.md focused on using the interfaces and assembling a rest. Put contributor instructions here. Record design rationale the code cannot show (sources, print and fit constraints, known limits) in the relevant module or class docstring, without restating parameter defaults.
+- Keep documentation brief. README.md and code comments describe the current state, not the history of edits. Record change history in `changelog/` when useful.

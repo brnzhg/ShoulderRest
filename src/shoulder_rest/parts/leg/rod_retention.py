@@ -1,6 +1,12 @@
 """Optional solid bumps that retain HingeLeg's rod, in the hinge source frame.
 
-Dimensions are in millimeters. These are prototype fits requiring print trials.
+Dimensions are in millimeters. The rest prints with its mounting face on the
+bed, which puts source +Z toward the bed: each channel's +Z wall becomes its
+printed floor, so the bumps grow upward with support.
+
+This is a local deformation fit. Insertion force, wear and retention need a
+PETG print trial; tune ``interference`` in steps of about 0.05 mm, using
+``examples/rod_retention_coupon.py --export`` for a test coupon.
 """
 
 from dataclasses import dataclass, fields

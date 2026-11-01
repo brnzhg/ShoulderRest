@@ -4,6 +4,13 @@ Source frame: the rod axis is X through the origin, the nut housing extends
 toward +Y, and the screw runs along Z. Side profiles are sketched in XY with
 horizontal = body Y and vertical = body Z, then placed on the YZ plane.
 Lengths are in millimeters and angles in degrees. Run to preview the leg.
+
+Source: Onshape "Hinge Slot Leg"
+(https://cad.onshape.com/documents/4b6fd83d4ef915bc8da1e93f/w/38814d255f0d64578653c02a/e/db1dc0bcdac152a853d83f7c),
+exported to ``assets/leg/`` as modeling references. With
+``rod_bore_clearance=0.2`` the leg and default cavity match the Onshape solids
+by volume and two-way Boolean difference; the housing guide fills the source
+dummy housing's one-sided underside notch to stay symmetric.
 """
 
 from copy import deepcopy
@@ -98,7 +105,13 @@ class LegParameters:
 
 @dataclass(frozen=True)
 class CavityParameters:
-    """Fit and insertion clearances, separate from the printable leg dimensions."""
+    """Fit and insertion clearances, separate from the printable leg dimensions.
+
+    ``nose_clearance`` deepens the nose recess toward -Y and -Z, leaving the
+    rear step, leg and mount unchanged. It makes room for a hand-cut piece of
+    thin foam and consumes the housing's front and bottom walls rather than
+    growing it, so check the material left in the final rest.
+    """
 
     clearance: float = 0.1
     bottom_clearance: float = 0.1

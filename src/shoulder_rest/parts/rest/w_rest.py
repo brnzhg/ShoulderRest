@@ -168,7 +168,13 @@ class WRestParameters:
 def w_rest_geometry(
     violin: ViolinOutline, shoulder: Shoulder, p: WRestParameters = WRestParameters(),
 ) -> RestGeometry:
-    """Cut the head to the shoulder and cap its ends, join the tail, then round edges."""
+    """Cut the head to the shoulder and cap its ends, join the tail, then round edges.
+
+    Whether the fillets succeed depends on the fit; radii are never reduced
+    automatically. For example, the uncapped default fit cannot take the head
+    bottom fillet. Material outside the shoulder cutter keeps the full
+    oversized head depth, so inspect the fit where the head passes the cast.
+    """
     left = violin.attachment_point("left", p.left_fraction)
     right = violin.attachment_point("right", p.right_fraction)
     violin_mount = violin.mount_location * Pos(0, 0, p.violin_gap)

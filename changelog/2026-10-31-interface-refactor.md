@@ -10,6 +10,10 @@ Geometry is unchanged. Bar rests and legs are bit-identical; the W rest coincide
 - `Shoulder` and `ViolinOutline` are concrete classes. The STEP and spline modules now only load or trace input data. Shoulder shapes stay in the shoulder's local frame instead of following its assembly.
 - Joints mark attachment frames on finished parts and assemblies. `HingeLegPart`'s rod, screw and nut joints, the hinge template's assembly joints (including `mount_joint` and the `hinge` revolute joint) and `Rest`'s mount joints are unchanged. Leg components copied by `leg()` keep their joints. Builders pass frames to one another as `Location`s.
 
+## Documentation
+
+- Removed `specs/`. Its parameter values and API descriptions duplicated the code; the remaining rationale (Onshape source, print orientation, rod-retention trials, nose clearance, fit limits) now lives in the relevant docstrings.
+
 ## API map
 
 | Before | After |

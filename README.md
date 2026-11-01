@@ -65,7 +65,7 @@ rest.position_on(violin)
 scene = Compound(children=[shoulder.assembly, violin.block, rest.assembly])
 ```
 
-`rest.part` is the printable body. It is printed with its mounting face on the bed (see [print orientation](specs/rest_spec.md#print-orientation)).
+`rest.part` is the printable body. It is printed with its flat mounting face on the bed, so export it in its local frame and turn it over.
 
 ## Extending
 
@@ -80,7 +80,6 @@ scene = Compound(children=[shoulder.assembly, violin.block, rest.assembly])
 - `assets/`: reference material, such as the original STEP solids.
 - `examples/`: standalone scripts, such as the rod-retention test coupon.
 - `tests/`: smoke checks for construction and placement.
-- `specs/`: frame conventions and feature geometry for the [violin outline](specs/violin_outline_spec.md), [legs](specs/leg_spec.md) and [rest bodies](specs/rest_spec.md).
 - `changelog/`: notable changes.
 - `exports/`: generated STEP and STL files, ignored by Git.
 

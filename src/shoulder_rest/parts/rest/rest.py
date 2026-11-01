@@ -2,6 +2,10 @@
 
 A rest body is modeled in the violin outline's local XY: its flat
 leg-mounting face is Z=0 and material extends toward -Z.
+
+The body is printed in PETG with that mounting face on the bed, so preserve
+the plane when shaping a body. Export ``Rest.part`` in its local frame and turn
+it over; the fitted scene is not a print pose.
 """
 
 from dataclasses import dataclass
