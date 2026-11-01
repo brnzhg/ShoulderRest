@@ -15,7 +15,7 @@ from build123d import (
 from shoulder_rest.parts._validation import single_solid
 from shoulder_rest.parts.shoulder import Shoulder
 from shoulder_rest.parts.violin_outline import ViolinOutline
-from .rest import RestGeometry, leg_mount
+from shoulder_rest.parts.rest import RestGeometry, leg_mount
 
 
 @dataclass(frozen=True)
