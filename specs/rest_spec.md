@@ -47,13 +47,13 @@ Front is the left side of the right-to-left travel, usually -Y; back is the righ
 
 ### Head (`WHeadParameters`)
 
-The head is a band around the head strokes, `front_width` (18) to the front and `back_width` (16) to the back, closed flat at both ends. Its left end is the sharp bend into the tail. It is extruded to the oversized `depth` (80), which must exceed the tail thickness, and cut with the shoulder cutter. Shape history captures the contact faces the cut creates, planar ones included, and follows them through later cuts and fillets.
+The head is a band around the head strokes, `front_width` (18) to the front and `back_width` (16) to the back, closed flat at both ends. Its left end is the sharp bend into the tail. It is extruded to the oversized `depth` (80), which must exceed the tail thickness, and cut with the shoulder cutter. Every head side wall reaches Z=0, so until the tail joins, the head's bottom (contact, caps and blends) is exactly the set of faces lying entirely below Z=0.
 
 `left_cap` and `right_cap` optionally trim each end with a `WHeadCapParameters` after the shoulder cut, before the tail is joined:
 
 - The cap line crosses the end's centerline at Z=`-height` (12). At signed distance `s` toward the front, it is at Z=`-height - s*tan(angle)`. Zero `angle` (default 10°) is level, and a positive angle lowers the front. The angle must be strictly between -90° and 90°, and the line must stay below the mounting face.
 - The cutting plane contains that line and the end's inward tangent. A box below the plane removes material up to a stop plane `depth` (20) mm inward. The left cap follows stroke 3 inward, independent of the tail angle.
-- `blend_radius` (10) first rounds the cap-to-step join, if the cut left a step, then the join between the trim and the shoulder contact faces. Zero leaves the cut sharp.
+- `blend_radius` (10) first rounds the cap-to-step join, if the cut left a step, then the seam where the trim (cap, step and step blend, the last selected with `Select.LAST`) meets the rest of the bottom. Zero leaves the cut sharp.
 
 A cap that misses the head, reaches Z=0, disconnects the head, has no shoulder join to blend, or cannot take its blend radius raises an error naming its end. The radius is never reduced automatically.
 
@@ -63,7 +63,7 @@ The tail is `width` (24) wide in total and `thickness` (12) deep. Its sides leav
 
 ### Joining and rounding
 
-After capping, every head side wall still reaches Z=0, so the head faces entirely below Z=0 form its bottom: shoulder contact, caps and blends. The tail is then joined. Rounding follows, in this order:
+After capping, the head's bottom faces are collected and the tail is joined. The join and the head corner fillets leave remnants of the head's end walls below Z=0, so shape history carries the bottom through those two steps. Rounding follows, in this order:
 
 1. `head.corner_radius` (4) rounds the upright corners at both head ends. At the left end the tail covers the corners down to its underside, where head and tail meet tangentially, so only the edges below it are rounded.
 2. `head.bottom_radius` (2) rounds the outline where the bottom faces meet the side walls, excluding seams within the bottom.

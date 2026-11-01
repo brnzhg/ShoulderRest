@@ -6,14 +6,14 @@ Front is the left side of that travel (usually -Y), back the right side.
 Run to preview the rest on the bundled shoulder.
 """
 
-from collections.abc import Iterable, Sequence
+from collections.abc import Iterable
 from dataclasses import dataclass
 from math import cos, isfinite, radians, sin, tan
 
 from build123d import (
     Align, Axis, Bezier, Box, BuildLine, BuildSketch, Compound, Edge, Face,
     FilletPolyline, GeomType, Line, Location, Mode, Part, Plane, Polyline, Pos,
-    Shape, Side, Sketch, Vector, Wire, extrude, fillet, make_face,
+    Select, Shape, Side, Sketch, Vector, Wire, extrude, fillet, make_face,
 )
 from build123d.topology import ShapeHistory
 
@@ -176,28 +176,31 @@ def w_rest_geometry(
     *head_edges, tail_edge = centerline.order_edges()
     head_path, tail_path = Wire(head_edges), Wire([tail_edge])
 
-    head = extrude(_head_footprint(head_path, p.head), amount=-p.head.depth)
-    head, contact = _contour(head, shoulder.cutter(violin_mount))
+    blank = extrude(_head_footprint(head_path, p.head), amount=-p.head.depth)
+    head = single_solid(
+        blank - shoulder.cutter(violin_mount), "Shoulder cut must leave one valid W head solid",
+    )
     for end, cap in (("left", p.head.left_cap), ("right", p.head.right_cap)):
         if cap is not None:
             try:
-                head, contact = _cap(head, contact, head_path, end, cap)
+                head = _cap(head, head_path, end, cap)
             except ValueError as error:
                 raise ValueError(f"{end.capitalize()} head cap: {error}") from error
 
-    # Every head side wall reaches Z=0, so the faces entirely below it form the
-    # bottom: shoulder contact, caps and blends.
-    bottom = [face for face in head.faces() if face.bounding_box().max.Z < -1e-6]
+    # Joining the tail and rounding the head corners leave remnants of the head's
+    # end walls below Z=0, so follow the bottom through them by history.
+    bottom = _head_bottom(head)
     tail = extrude(_tail_footprint(head_path, tail_path, p), amount=-p.tail.thickness)
-    joined = head + tail
-    bottom = _descendants(bottom, joined)
-    body = single_solid(joined, "Joining the tail must leave one valid W rest solid")
+    body = head + tail
+    bottom = _descendants(bottom, body)
+    single_solid(body, "Joining the tail must leave one valid W rest solid")
 
     body, bottom = _round_head_corners(body, bottom, head_path, p)
     body = _fillet_outline(body, bottom, p.head.bottom_radius, "Head bottom fillet")
     tail_bottom = _faces_on(body, Plane.XY.offset(-p.tail.thickness))
     body = _fillet_outline(body, tail_bottom, p.tail.bottom_radius, "Tail bottom fillet")
     body = _fillet_outline(body, _faces_on(body, Plane.XY), p.top_radius, "Top fillet")
+    body = single_solid(body, "W rest body must be one valid solid")
     body.label = "W rest body"
 
     # Each leg faces inward along its outer stroke.
@@ -268,17 +271,15 @@ def _tail_footprint(head_path: Wire, tail_path: Wire, p: WRestParameters) -> Ske
     return footprint.sketch
 
 
-def _contour(head: Part, cutter: Shape) -> tuple[Part, list[Face]]:
-    """Cut the shoulder contour, returning the head and its shoulder contact faces."""
-    contoured = head - cutter
-    # History finds the faces the cutter made, planar ones included.
-    contact = _descendants(list(cutter.faces()), contoured)
-    return single_solid(contoured, "Shoulder cut must leave one valid W head solid"), contact
+def _head_bottom(head: Part) -> list[Face]:
+    """Shoulder contact, cap and blend faces of the head before the tail joins.
+
+    Every head side wall reaches the Z=0 mounting face; the bottom lies entirely below it.
+    """
+    return [face for face in head.faces() if face.bounding_box().max.Z < -1e-6]
 
 
-def _cap(
-    head: Part, contact: list[Face], head_path: Wire, end: str, cap: WHeadCapParameters,
-) -> tuple[Part, list[Face]]:
+def _cap(head: Part, head_path: Wire, end: str, cap: WHeadCapParameters) -> Part:
     """Trim the "left" or "right" head end below an angled plane, then blend it into the contour."""
     t = 1 if end == "left" else 0
     tip, tangent = head_path @ t, head_path % t
@@ -302,22 +303,26 @@ def _cap(
         raise ValueError("Cap misses the head; reduce height or adjust depth")
     if removed.bounding_box().max.Z >= -1e-6:
         raise ValueError("Cap cut reaches the mounting face; increase height or reduce angle/depth")
-    capped = head - cutter
-    contact = _descendants(contact, capped)
-    capped = single_solid(capped, "Cap cut must leave one valid head solid")
+    capped = single_solid(head - cutter, "Cap cut must leave one valid head solid")
     if cap.blend_radius == 0:
-        return capped, contact
+        return capped
 
-    # Round the cap-to-step join first, then where the step (or the cap
-    # itself, when there is no step) meets the shoulder contour.
+    # Round the cap-to-step join first, then the seam where the trim (cap,
+    # step and their blend) meets the rest of the bottom: the shoulder contour.
+    step_blend: list[Face] = []
     step = _edges_between(_faces_on(capped, cap_plane), _faces_on(capped, stop_plane))
     if step:
-        capped, contact = _fillet(capped, step, cap.blend_radius, "Cap step blend", contact)
-    trim = _faces_on(capped, cap_plane) + _faces_on(capped, stop_plane)
-    seam = _edges_between(trim, contact)
+        capped = _fillet(capped, step, cap.blend_radius, "Cap step blend")
+        step_blend = list(capped.faces(Select.LAST))
+    trim = _faces_on(capped, cap_plane) + _faces_on(capped, stop_plane) + step_blend
+    trimmed = set(trim)
+    contour = [face for face in _head_bottom(capped) if face not in trimmed]
+    seam = _edges_between(trim, contour)
     if not seam:
         raise ValueError("Cap has no shoulder-surface join to blend; adjust height/depth")
-    return _fillet(capped, seam, cap.blend_radius, "Cap blend", contact)
+    return single_solid(
+        _fillet(capped, seam, cap.blend_radius, "Cap blend"), "Cap blend must leave one valid head solid",
+    )
 
 
 def _round_head_corners(
@@ -347,7 +352,8 @@ def _round_head_corners(
     ]
     if not edges:
         return body, bottom
-    return _fillet(body, edges, p.head.corner_radius, "Head corner fillet", bottom)
+    rounded = _fillet(body, edges, p.head.corner_radius, "Head corner fillet")
+    return rounded, _descendants(bottom, rounded)
 
 
 def _fillet_outline(body: Part, faces: list[Face], radius: float, name: str) -> Part:
@@ -356,16 +362,13 @@ def _fillet_outline(body: Part, faces: list[Face], radius: float, name: str) -> 
         return body
     selected = set(faces)
     others = [face for face in body.faces() if face not in selected]
-    rounded, _ = _fillet(body, _edges_between(faces, others), radius, name)
-    return rounded
+    return _fillet(body, _edges_between(faces, others), radius, name)
 
 
-def _fillet(
-    body: Part, edges: list[Edge], radius: float, name: str, tracked: Sequence[Face] = (),
-) -> tuple[Part, list[Face]]:
-    """Fillet edges into one valid solid, following ``tracked`` faces through it.
+def _fillet(body: Part, edges: list[Edge], radius: float, name: str) -> Part:
+    """Fillet edges, requiring one valid solid; ``name`` identifies the feature in errors.
 
-    ``name`` identifies the feature in errors.
+    Returns the fillet's own result, which keeps its history for selecting faces.
     """
     if not edges:
         raise ValueError(f"{name} has no edges to round")
@@ -373,8 +376,8 @@ def _fillet(
         result = body.fillet(radius, edges)
     except ValueError as error:
         raise ValueError(f"{name} failed; reduce its radius or adjust the fit") from error
-    tracked = _descendants(tracked, result) if tracked else []
-    return single_solid(result, f"{name} must leave one valid solid"), tracked
+    single_solid(result, f"{name} must leave one valid solid")
+    return result
 
 
 def _faces_on(body: Part, plane: Plane) -> list[Face]:
@@ -388,7 +391,10 @@ def _edges_between(faces: list[Face], others: list[Face]) -> list[Edge]:
 
 
 def _descendants(faces: Iterable[Face], result: Shape) -> list[Face]:
-    """Faces of an operation's result that are, or were rebuilt from, the given input faces."""
+    """Faces of an operation's result that are, or were rebuilt from, the given input faces.
+
+    Only the head bottom needs this, to survive the tail join and corner fillets.
+    """
     history = ShapeHistory.of(result)
     if history is None:
         raise ValueError("Operation must record face history")
