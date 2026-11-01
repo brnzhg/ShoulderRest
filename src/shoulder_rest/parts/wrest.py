@@ -2,7 +2,7 @@ from dataclasses import dataclass
 from math import cos, isfinite, radians, sin, tan
 
 from build123d import (
-    BuildLine, BuildPart, BuildSketch, Compound, Edge, Face, GeomType, Location,
+    Axis, Bezier, BuildLine, BuildPart, BuildSketch, Compound, Edge, Face, GeomType, Location,
     Mode, Part, Plane, Polyline, RigidJoint, Side, Solid, Vector, Wire,
     extrude, fillet, insert, make_face,
 )
@@ -44,10 +44,15 @@ class WRestParameters:
     All three angles are absolute offsets from (-1, 0) in local XY: zero
     points left, positive angles slope down, and negative angles slope up.
     tail_width is total width; head widths are offsets from the centerline.
+    tail_taper_length sets the transition from the head corners to the straight
+    tail; tail_taper_handle_ratio sets Bezier handle length / taper length.
     head_depth is the oversized depth below the mounting face before cutting.
-    Radii follow the centerline from right to left at the ends of strokes 1,
-    2, and 3. Zero leaves a sharp corner. The end extensions continue the
-    adjacent strokes without introducing bends at the attachment points.
+    Radii round the two bends within the head, at the ends of strokes 1 and 2.
+    Zero leaves a sharp corner. The head-to-tail junction stays sharp so the
+    head closes on a flat end perpendicular to stroke 3. The end extensions
+    continue the adjacent strokes without introducing bends at the attachment points.
+    head_corner_radius rounds the four upright end corners; zero disables it.
+    tail_corner_radius rounds the two upright free-end corners; zero disables it.
     Optional left_cap and right_cap trim the head ends independently.
     """
 
@@ -64,22 +69,26 @@ class WRestParameters:
 
     first_radius: float = 40
     second_radius: float = 10
-    third_radius: float = 5
 
     tail_width: float = 24
     tail_thickness: float = 12
+    tail_corner_radius: float = 4
+    tail_taper_length: float = 30
+    tail_taper_handle_ratio: float = 1 / 3
     head_front_width: float = 18
     head_back_width: float = 16
     head_depth: float = 80
+    head_corner_radius: float = 4
     violin_gap: float = 12
     left_cap: WHeadCapParameters | None = None
     right_cap: WHeadCapParameters | None = None
 
     def __post_init__(self) -> None:
         lengths = (self.w1, self.w2, self.w3, self.right_extend,
-                   self.left_extend, self.tail_width, self.tail_thickness,
+                   self.left_extend, self.tail_width, self.tail_thickness, self.tail_taper_length,
                    self.head_front_width, self.head_back_width)
-        radii = (self.first_radius, self.second_radius, self.third_radius)
+        radii = (self.first_radius, self.second_radius,
+                 self.head_corner_radius, self.tail_corner_radius)
         if not all(isfinite(value) and value > 0 for value in lengths):
             raise ValueError("W lengths, widths, and tail thickness must be finite and positive")
         if not isfinite(self.head_depth) or self.head_depth <= self.tail_thickness:
@@ -91,6 +100,8 @@ class WRestParameters:
             raise ValueError("W stroke angles must be finite")
         if not isfinite(self.violin_gap) or self.violin_gap < 0:
             raise ValueError("Violin gap must be finite and nonnegative")
+        if not isfinite(self.tail_taper_handle_ratio) or not 0 < self.tail_taper_handle_ratio <= 1:
+            raise ValueError("Tail taper handle ratio must be in (0, 1]")
         for cap in (self.left_cap, self.right_cap):
             if cap is not None:
                 slope = -tan(radians(cap.angle))
@@ -123,11 +134,11 @@ def _rounded_centerline(
     points = (
         right_tip, first, second, third, left_tip,
     )
-    radii = (p.first_radius, p.second_radius, p.third_radius)
+    radii = (p.first_radius, p.second_radius)
 
     with BuildLine(mode=Mode.PRIVATE) as centerline:
         Polyline(*points)
-        for corner, radius in zip(points[1:-1], radii):
+        for corner, radius in zip(points[1:3], radii):
             if radius == 0:
                 continue
             vertex = min(centerline.vertices(), key=lambda v: (Vector(v) - corner).length)
@@ -135,11 +146,37 @@ def _rounded_centerline(
     return centerline.wires()[0]
 
 
+def _tail_footprint(head_path: Wire, tail_path: Wire, p: WRestParameters) -> Face:
+    """Join the head corners to the straight tail with two cubic Bezier curves."""
+    if p.tail_taper_length >= tail_path.length:
+        raise ValueError("Tail taper length must be shorter than the tail stroke")
+    junction = head_path.position_at(1)
+    head_direction = head_path.tangent_at(1)
+    tail_direction = tail_path.tangent_at(0)
+    head_front = Vector(-head_direction.Y, head_direction.X, 0)
+    tail_front = Vector(-tail_direction.Y, tail_direction.X, 0)
+    taper_end = junction + tail_direction * p.tail_taper_length
+    tip = tail_path.position_at(1)
+    handle = p.tail_taper_length * p.tail_taper_handle_ratio
+    front_start = junction + head_front * p.head_front_width
+    back_start = junction - head_front * p.head_back_width
+    front_end = taper_end + tail_front * (p.tail_width / 2)
+    back_end = taper_end - tail_front * (p.tail_width / 2)
+    with BuildLine(mode=Mode.PRIVATE) as outline:
+        for start, end in ((front_start, front_end), (back_start, back_end)):
+            Bezier(start, start + head_direction * handle,
+                   end - tail_direction * handle, end)
+        Polyline(front_end, tip + tail_front * (p.tail_width / 2),
+                 tip - tail_front * (p.tail_width / 2), back_end)
+        Polyline(back_start, front_start)
+    return Face(outline.wires()[0])
+
+
 def _blank_sections(centerline: Wire, p: WRestParameters) -> tuple[Part, Part]:
     """Return a thin tail and an oversized head in local XY, below Z=0.
 
-    The last straight stroke is the tail; the joining fillet belongs to the
-    head. Front is the left side of the right-to-left path (usually lower Y).
+    The last straight stroke is the tail; the head ends at its sharp junction
+    with stroke 3. Front is the left side of the right-to-left path (usually lower Y).
     Head widths are distances from the centerline; tail_width is total width.
     """
     edges = centerline.order_edges()
@@ -148,22 +185,57 @@ def _blank_sections(centerline: Wire, p: WRestParameters) -> tuple[Part, Part]:
     head_path = Wire(edges[:-1])
     tail_path = Wire(edges[-1:])
     with BuildSketch(mode=Mode.PRIVATE) as tail_footprint:
-        make_face(tail_path.offset_2d(p.tail_width / 2, side=Side.BOTH))
+        insert(_tail_footprint(head_path, tail_path, p))
     with BuildSketch(mode=Mode.PRIVATE) as head_footprint:
         make_face(head_path.offset_2d(p.head_front_width, side=Side.LEFT))
         make_face(head_path.offset_2d(p.head_back_width, side=Side.RIGHT))
     with BuildPart(mode=Mode.PRIVATE) as tail:
         extrude(tail_footprint.sketch, amount=-p.tail_thickness)
+        if p.tail_corner_radius:
+            upright_edges = tail.edges().filter_by(Axis.Z)
+            tip = tail_path.position_at(1)
+            direction = tail_path.tangent_at(1)
+            front = Vector(-direction.Y, direction.X, 0)
+            corners = []
+            for offset in (-p.tail_width / 2, p.tail_width / 2):
+                corner = tip + front * offset
+                corners.append(min(upright_edges, key=lambda edge: edge.distance_to(corner)))
+            fillet(corners, radius=p.tail_corner_radius)
     with BuildPart(mode=Mode.PRIVATE) as head:
         extrude(head_footprint.sketch, amount=-p.head_depth)
     assert tail.part_local is not None and head.part_local is not None
     return tail.part_local, head.part_local
 
 
+def _fillet_head_corners(body: Part, centerline: Wire, p: WRestParameters) -> Part:
+    """Round exposed head corners after the tail has joined the body."""
+    if not p.head_corner_radius:
+        return body
+    head_path = Wire(centerline.order_edges()[:-1])
+    upright_edges = body.edges().filter_by(Axis.Z)
+    corners = []
+    for parameter in (0, 1):
+        end = head_path.position_at(parameter)
+        direction = head_path.tangent_at(parameter)
+        front = Vector(-direction.Y, direction.X, 0)
+        for offset in (p.head_front_width, -p.head_back_width):
+            corner = end + front * offset
+            # The left seam above the tail underside is tangent, not a corner.
+            corners.extend(edge for edge in upright_edges
+                           if (Vector(edge.center().X, edge.center().Y, 0) - corner).length < 1e-6
+                           and (parameter == 0 or edge.bounding_box().max.Z <= -p.tail_thickness + 1e-6))
+    if not corners:
+        return body
+    result = body.fillet(p.head_corner_radius, corners)
+    if not result.is_valid or len(result.solids()) != 1:
+        raise ValueError("Head corner fillets must leave one valid W rest solid")
+    return Part(result.solids())
+
+
 def _blank_from_centerline(centerline: Wire, p: WRestParameters) -> Part:
     """Join the tail and oversized head for inspecting or mounting the blank."""
     tail, head = _blank_sections(centerline, p)
-    return tail + head
+    return _fillet_head_corners(tail + head, centerline, p)
 
 
 def _retained_faces(sources: list[Face], result: Part | Solid) -> list[Face]:
@@ -343,6 +415,7 @@ class WRestGeometry(RestGeometry):
         body = contoured.part_local
         if body is None or not body.is_valid or len(body.solids()) != 1:
             raise ValueError("Shoulder cut must leave one valid W rest solid")
+        body = _fillet_head_corners(body, centerline, p)
 
         # The centerline runs right to left. Its end tangents give the outward
         # directions of the two straight mounting strokes.
