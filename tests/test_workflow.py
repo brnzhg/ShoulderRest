@@ -9,7 +9,7 @@ from shoulder_rest.parts.rest import Rest
 from shoulder_rest.parts.shoulder.step_shoulder import load_shoulder_cast
 from shoulder_rest.parts.simple_rest import build_simple_rest
 from shoulder_rest.parts.violin_outline.spline_violin_outline import build_violin_outline
-from shoulder_rest.parts.wrest import WRestGeometry
+from shoulder_rest.parts.wrest import WHeadCapParameters, WRestGeometry, WRestParameters
 
 
 class WorkflowTests(unittest.TestCase):
@@ -23,7 +23,10 @@ class WorkflowTests(unittest.TestCase):
             ),
         )
         violin = build_violin_outline()
-        geometry = WRestGeometry(violin, shoulder)
+        geometry = WRestGeometry(violin, shoulder, WRestParameters(
+            left_cap=WHeadCapParameters(angle=24, height=34, depth=30),
+            right_cap=WHeadCapParameters(angle=10, height=30, depth=20),
+        ))
         self.assertEqual(geometry.part.location, Location())
         rest = Rest(geometry, build_hinge_leg())
         rest.position_on(violin)

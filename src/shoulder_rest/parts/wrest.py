@@ -53,6 +53,9 @@ class WRestParameters:
     continue the adjacent strokes without introducing bends at the attachment points.
     head_corner_radius rounds the four upright end corners; zero disables it.
     tail_corner_radius rounds the two upright free-end corners; zero disables it.
+    head_bottom_radius rounds the shoulder/cap perimeter after the corner fillets.
+    tail_bottom_radius and top_radius round the tail underside and full top perimeter.
+    Set any edge fillet radius to zero to disable it.
     Optional left_cap and right_cap trim the head ends independently.
     """
 
@@ -73,12 +76,15 @@ class WRestParameters:
     tail_width: float = 24
     tail_thickness: float = 12
     tail_corner_radius: float = 4
+    tail_bottom_radius: float = 1
     tail_taper_length: float = 30
     tail_taper_handle_ratio: float = 1 / 3
     head_front_width: float = 18
     head_back_width: float = 16
     head_depth: float = 80
     head_corner_radius: float = 4
+    head_bottom_radius: float = 2
+    top_radius: float = 1
     violin_gap: float = 12
     left_cap: WHeadCapParameters | None = None
     right_cap: WHeadCapParameters | None = None
@@ -88,7 +94,8 @@ class WRestParameters:
                    self.left_extend, self.tail_width, self.tail_thickness, self.tail_taper_length,
                    self.head_front_width, self.head_back_width)
         radii = (self.first_radius, self.second_radius,
-                 self.head_corner_radius, self.tail_corner_radius)
+                 self.head_corner_radius, self.tail_corner_radius, self.head_bottom_radius,
+                 self.tail_bottom_radius, self.top_radius)
         if not all(isfinite(value) and value > 0 for value in lengths):
             raise ValueError("W lengths, widths, and tail thickness must be finite and positive")
         if not isfinite(self.head_depth) or self.head_depth <= self.tail_thickness:
@@ -207,7 +214,7 @@ def _blank_sections(centerline: Wire, p: WRestParameters) -> tuple[Part, Part]:
     return tail.part_local, head.part_local
 
 
-def _fillet_head_corners(body: Part, centerline: Wire, p: WRestParameters) -> Part:
+def _fillet_head_corners(body: Part, centerline: Wire, p: WRestParameters) -> Part | Solid:
     """Round exposed head corners after the tail has joined the body."""
     if not p.head_corner_radius:
         return body
@@ -229,13 +236,13 @@ def _fillet_head_corners(body: Part, centerline: Wire, p: WRestParameters) -> Pa
     result = body.fillet(p.head_corner_radius, corners)
     if not result.is_valid or len(result.solids()) != 1:
         raise ValueError("Head corner fillets must leave one valid W rest solid")
-    return Part(result.solids())
+    return result
 
 
 def _blank_from_centerline(centerline: Wire, p: WRestParameters) -> Part:
     """Join the tail and oversized head for inspecting or mounting the blank."""
     tail, head = _blank_sections(centerline, p)
-    return _fillet_head_corners(tail + head, centerline, p)
+    return Part(_fillet_head_corners(tail + head, centerline, p).solids())
 
 
 def _retained_faces(sources: list[Face], result: Part | Solid) -> list[Face]:
@@ -258,6 +265,45 @@ def _shared_edges(first: list[Face], second: list[Face]) -> list[Edge]:
                 and not any(edge.is_same(e) for e in shared)):
             shared.append(edge)
     return shared
+
+
+def _fillet_head_bottom(body: Part | Solid, bottom_faces: list[Face], radius: float) -> Part:
+    """Round the outer boundary of the combined shoulder/cap surface."""
+    if not radius:
+        return Part(body.solids())
+    other_faces = [face for face in body.faces()
+                   if not any(face.is_same(bottom) for bottom in bottom_faces)]
+    perimeter = _shared_edges(bottom_faces, other_faces)
+    if not perimeter:
+        raise ValueError("Head bottom has no perimeter to fillet")
+    try:
+        result = body.fillet(radius, perimeter)
+    except ValueError as error:
+        raise ValueError("Head bottom fillet failed; adjust the fit or caps, or reduce/disable head_bottom_radius") from error
+    if not result.is_valid or len(result.solids()) != 1:
+        raise ValueError("Head bottom fillet must leave one valid W rest solid")
+    return Part(result.solids())
+
+
+def _fillet_planar_perimeter(body: Part, z: float, radius: float, name: str) -> Part:
+    """Round a horizontal face perimeter on the joined body before leg installation."""
+    if not radius:
+        return body
+    plane = Plane(origin=(0, 0, z))
+    faces = [face for face in body.faces()
+             if face.geom_type == GeomType.PLANE and face.is_coplanar(plane)]
+    others = [face for face in body.faces()
+              if not any(face.is_same(selected) for selected in faces)]
+    perimeter = _shared_edges(faces, others)
+    if not perimeter:
+        raise ValueError(f"{name} has no perimeter to fillet")
+    try:
+        result = body.fillet(radius, perimeter)
+    except ValueError as error:
+        raise ValueError(f"{name} fillet failed; reduce its radius") from error
+    if not result.is_valid or len(result.solids()) != 1:
+        raise ValueError(f"{name} fillet must leave one valid W rest solid")
+    return Part(result.solids())
 
 
 def _blend_cap_edges(
@@ -408,14 +454,19 @@ class WRestGeometry(RestGeometry):
         # Finish the shoulder contour first, then cut and blend the head caps.
         head, contact_faces = _contoured_head(head, shoulder.extended.moved(pose.inverse()))
         head = _capped_head(head, contact_faces, centerline, p)
-        # Join the untrimmed tail after shaping the head.
-        with BuildPart(mode=Mode.PRIVATE) as contoured:
-            insert(head)
-            insert(tail)
-        body = contoured.part_local
-        if body is None or not body.is_valid or len(body.solids()) != 1:
+        # Before joining the tail, every head side wall reaches Z=0. The
+        # remaining faces below it form the bottom, including caps and blends.
+        bottom_faces = [face for face in head.faces() if face.bounding_box().max.Z < -1e-6]
+        body = head + tail
+        bottom_faces = _retained_faces(bottom_faces, body)
+        if not body.is_valid or len(body.solids()) != 1:
             raise ValueError("Shoulder cut must leave one valid W rest solid")
-        body = _fillet_head_corners(body, centerline, p)
+        rounded = _fillet_head_corners(body, centerline, p)
+        if p.head_corner_radius:
+            bottom_faces = _retained_faces(bottom_faces, rounded)
+        body = _fillet_head_bottom(rounded, bottom_faces, p.head_bottom_radius)
+        body = _fillet_planar_perimeter(body, -p.tail_thickness, p.tail_bottom_radius, "Tail bottom")
+        body = _fillet_planar_perimeter(body, 0, p.top_radius, "Rest top")
 
         # The centerline runs right to left. Its end tangents give the outward
         # directions of the two straight mounting strokes.

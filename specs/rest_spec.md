@@ -81,7 +81,11 @@ The final straight stroke is the tail: a bar with total width `tail_width`, extr
 
 `head_corner_radius` (default 4 mm; zero disables it) rounds the exposed upright corner edges at the head ends after shoulder contouring, cap cuts, and joining the tail. At the tail junction, these edges stop at the underside of the tail; the connected footprint above that face stays intact.
 
+`head_bottom_radius` (default 2 mm; zero disables it) rounds the outer perimeter of the combined shoulder-contact and cap surfaces after the tail is joined and head corners are rounded. Internal seams between these surfaces are excluded. Fillet feasibility depends on the fit: the current capped preview supports 2 mm, while the uncapped preview fit requires adjusting the contour/caps or disabling this fillet.
+
 `tail_corner_radius` (default 4 mm; zero disables it) independently rounds the two upright corners at the tail's free end. The flat portion of the end remains at the centerline tip; the fillets remove material without extending the tail.
+
+`tail_bottom_radius` and `top_radius` (each default 1 mm; zero disables either) round the tail underside perimeter and the entire rest's Z=0 top perimeter, respectively. These fillets run on the joined body after the head bottom fillet and before leg installation. The tail underside includes its concave junction with the deeper head.
 
 `WRestGeometry` places the violin on the shoulder, cuts only the head with `shoulder.extended` in the blank's local frame, then joins the untouched tail. Two cubic Bézier curves connect the head end corners to the straight tail sides, tangent to the head stroke at the head and to the tail stroke at the other end. `tail_taper_length` (default 30 mm) measures the transition along the tail centerline and must be shorter than that stroke. `tail_taper_handle_ratio` (default 1/3) sets both curves' tangent handle lengths as a fraction of the taper length; larger values hold the endpoint directions longer. The tail and head share the head's flat end boundary. Inspect the fit where the head extends beyond the shoulder cutter: material outside its footprint retains the full oversized depth.
 
