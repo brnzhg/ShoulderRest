@@ -1,7 +1,6 @@
-"""Optional solid rod-retention bumps for HingeLeg, in its source frame.
+"""Optional solid bumps that retain HingeLeg's rod, in the hinge source frame.
 
-Dimensions are millimeters. Tooling returns local geometry for explicit insertion.
-These are prototype fits requiring print trials.
+Dimensions are in millimeters. These are prototype fits requiring print trials.
 """
 
 from dataclasses import dataclass, fields
@@ -16,7 +15,7 @@ if TYPE_CHECKING:
 
 @dataclass(frozen=True)
 class RodRetentionParameters:
-    """Solid ribs on each channel's +Z wall, which is underneath when printed."""
+    """Solid ribs on each rod channel's +Z wall, which is the floor when printed."""
 
     interference: float = 0.10  # Rod diameter minus minimum throat opening.
     bump_radius: float = 0.45
@@ -28,14 +27,15 @@ class RodRetentionParameters:
             raise ValueError("Rod-retention dimensions must be finite and positive")
 
 
-def _rod_retention(
+def _retention_bumps(
     p: "LegParameters", c: "CavityParameters", r: RodRetentionParameters,
-) -> tuple[Part, Part]:
+) -> Part:
+    """Two bumps, one centered on each rod overhang outside the leg cavity."""
     half_slot = c.slot_width(p.rod) / 2
-    # Source +Z faces the bed: these ribs grow from the printed channel floor.
     bump_z = half_slot - c.rod_slot_clearance - r.interference + r.bump_radius
-    cavity_half = p.width / 2 + c.clearance
-    overhang = p.rod.length / 2 - cavity_half
+    cavity_half_width = p.width / 2 + c.clearance
+    overhang = p.rod.length / 2 - cavity_half_width
+    bump_x = cavity_half_width + overhang / 2
     entry_y = (1 - sqrt(2)) * half_slot + c.rod_slot_run
     if r.interference >= p.rod.diameter:
         raise ValueError("Rod throat must remain open")
@@ -49,12 +49,8 @@ def _rod_retention(
         raise ValueError("Retention bumps must clear the seated rod")
     if bump_z + r.bump_radius >= p.rod_house_half:
         raise ValueError("Retention bumps must fit below the mounting face")
-    bumps = []
-    for side in (-1, 1):
-        with BuildPart(mode=Mode.PRIVATE) as bump:
-            with Locations((side * (cavity_half + overhang / 2), r.bump_y, bump_z)):
-                Cylinder(r.bump_radius, r.bump_width, rotation=(0, 90, 0))
-        assert bump.part_local is not None
-        bumps.append(bump.part_local)
-    return bumps[0], bumps[1]
-
+    with BuildPart(mode=Mode.PRIVATE) as bumps:
+        with Locations((-bump_x, r.bump_y, bump_z), (bump_x, r.bump_y, bump_z)):
+            Cylinder(r.bump_radius, r.bump_width, rotation=(0, 90, 0))
+    assert bumps.part is not None
+    return bumps.part

@@ -6,7 +6,6 @@ readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
     "build123d>=0.12.0",
-    "mypy>=2.3.1",
 ]
 
 [build-system]
@@ -20,5 +19,10 @@ module-root = "src"
 
 [dependency-groups]
 dev = [
+    "mypy>=2.3.1",
     "ocp-vscode>=4.1.0",
 ]
+
+[[tool.mypy.overrides]]
+module = ["ocp_vscode"]
+ignore_missing_imports = true

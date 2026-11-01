@@ -1,100 +1,57 @@
-"""Shoulder geometry and violin attachment; run this module to preview them."""
+"""The bundled shoulder cast, loaded from STEP files; run to preview it."""
 
-from copy import deepcopy
 from importlib.resources import as_file, files
-from os import PathLike
 
-from build123d import Compound, Location, RigidJoint, import_step
+from build123d import Location, Pos, Rotation, VectorLike, import_step
+
 from .shoulder import Shoulder
 
 
-class StepShoulder(Shoulder):
-    """A Shoulder made from two STEP files sharing one source coordinate frame.
+CAST_LOCATION = Location((0, 0, 0), (30, 30, -5))
+"""Maps the bundled STEP files' scan frame into the corrected shoulder frame."""
 
-    ``cast_location`` maps both files into the corrected shoulder frame.
-    ``violin_location`` is specified directly in that corrected frame, without
-    applying ``cast_location`` again. Both default to the identity location.
 
-    Position the finished shoulder through ``assembly.locate(...)`` or its joint.
-    Connect joints before nesting the assembly, following build123d's convention.
+def fitted_violin_location(
+    *, angle: float = 24, level: float = 8, roll: float = 24,
+    offset: VectorLike = (18, 2, 24),
+) -> Location:
+    """Violin mount frame on the bundled cast, in degrees and mm.
+
+    Starting from a base point on the cast, ``angle`` turns the violin about
+    the vertical, ``level`` tilts it level, ``offset`` moves it in that turned
+    frame and ``roll`` rolls it about the mount Y axis.
     """
-
-    def __init__(
-        self,
-        reference_file: str | PathLike[str],
-        extended_file: str | PathLike[str],
-        *,
-        cast_location: Location,
-        violin_location: Location,
-    ) -> None:
-        self._reference = import_step(reference_file).moved(cast_location)
-        self._reference.label = "Shoulder reference"
-        self._extended = import_step(extended_file).moved(cast_location)
-        self._extended.label = "Shoulder extended"
-        self._assembly = Compound(
-            label="Shoulder", children=[deepcopy(self._reference)]
-        )
-        self._violin_joint = RigidJoint(
-            "violin",
-            to_part=self._assembly,
-            joint_location=violin_location
-        )
-
-    @property
-    def reference(self) -> Compound:
-        return self._reference.moved(self._assembly.global_location)
-
-    @property
-    def extended(self) -> Compound:
-        return self._extended.moved(self._assembly.global_location)
-
-    @property
-    def assembly(self) -> Compound:
-        return self._assembly
-
-    @property
-    def violin_joint(self) -> RigidJoint:
-        return self._violin_joint
+    base = Pos(-55, -87.5, 57.5)
+    return (
+        base * Rotation(0, 0, 90 - angle) * Rotation(level, 0, 0)
+        * Location(offset, (0, -roll, 0))
+    )
 
 
-# TODO attach a box to the violin joint to view
 def load_shoulder_cast(
-        cast_location: Location,
-        violin_location: Location,
-    ) -> Shoulder:
-
+    cast_location: Location = CAST_LOCATION,
+    violin_location: Location | None = None,
+) -> Shoulder:
+    """Load the bundled casts; ``violin_location`` defaults to the current fit."""
+    if violin_location is None:
+        violin_location = fitted_violin_location()
     assets = files("shoulder_rest").joinpath("assets", "shoulder_cast")
     with (
         as_file(assets.joinpath("shoulder_reference_solid.step")) as reference_file,
         as_file(assets.joinpath("shoulder_extended_solid.step")) as extended_file,
     ):
-        return StepShoulder(
-            reference_file,
-            extended_file,
-            cast_location=(
-                cast_location
-                #Location((0, 0, 0), (30, 30, -5))
-            ),
-            violin_location=(
-                violin_location
-            ),
-        )
+        reference = import_step(reference_file).moved(cast_location)
+        extended = import_step(extended_file).moved(cast_location)
+    reference.label = "Shoulder reference"
+    extended.label = "Shoulder extended"
+    return Shoulder(reference, extended, violin_location)
+
 
 if __name__ == "__main__":
     from ocp_vscode import show
 
-    shoulder = load_shoulder_cast(
-        cast_location=Location((0, 0, 0), (30, 30, -5)),
-        violin_location=(
-            # Base location, violin level correction, orient Z direction
-            Location((-55, -87.5, 57.5), (4, 0, 90 - 30)) * 
-            # Offset from base, violin roll angle
-            Location((0, 5, 20), (0, -26, 0))
-        )
-    )
+    shoulder = load_shoulder_cast()
     show(
-        shoulder.assembly,
-        shoulder.extended,
-        shoulder.violin_joint.symbol,
-        names=["Shoulder", "Extended cutting tool", "Violin attachment"],
+        shoulder.assembly, shoulder.extended, shoulder.violin_joint.symbol,
+        names=["Shoulder", "Extended cutting tool", "Violin mount"],
     )

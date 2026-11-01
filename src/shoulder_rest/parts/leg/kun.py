@@ -1,4 +1,4 @@
-"""Reusable cutting profiles for the Kun screw leg; dimensions are in millimeters."""
+"""Openings for the Kun screw-leg hardware; dimensions are in millimeters."""
 
 from dataclasses import dataclass, fields
 from math import cos, isfinite, radians, sin, sqrt, tan
@@ -35,22 +35,26 @@ class KunParameters:
             raise ValueError("Screw opening must fit within the nut slot width")
         angle = radians(self.screw_tangent_angle)
         tangent_x = self.screw_circle_offset - radius * cos(angle)
-        roof_x = self.screw_circle_offset - radius - self.screw_roof_extension
+        roof_x = self.roof_x
         roof_y = radius * sin(angle) - (tangent_x - roof_x) / tan(angle)
         if tangent_x >= 0 or roof_y <= 0:
             raise ValueError("Screw tangent angle/roof extension cannot form the clipped roof")
 
+    @property
+    def roof_x(self) -> float:
+        """X of the screw opening's clipped roof tip."""
+        return self.screw_circle_offset - self.screw_diameter / 2 - self.screw_roof_extension
+
 
 def screw_hole_face(p: KunParameters = KunParameters()) -> Face:
-    """XY opening at nominal screw axis (0, 0); extrude along Z.
+    """Printable screw opening in XY, centered on the nominal screw axis; extrude along Z.
 
-    Keep the circle on -X, square off its +X side, and extend a clipped tangent
-    roof on -X. The profile is symmetric about X; its circle is offset along +X.
+    The circle is offset along +X, its +X side is squared off, and a clipped
+    tangent roof extends it toward -X, symmetric about the X axis.
     """
     radius = p.screw_diameter / 2
     center_x = p.screw_circle_offset
-    half_span = sqrt(radius**2 - center_x**2)  # Circle's half-chord at X=0.
-    roof_x = center_x - radius - p.screw_roof_extension
+    half_chord = sqrt(radius**2 - center_x**2)  # Circle's half-width at X=0.
     with BuildSketch(mode=Mode.PRIVATE) as profile:
         with Locations((center_x, 0)):
             Circle(radius)
@@ -58,21 +62,14 @@ def screw_hole_face(p: KunParameters = KunParameters()) -> Face:
 
         # Replace the +X half with a rectangle meeting the circle at its chord.
         split(bisect_by=Plane.YZ, keep=Keep.BOTTOM)
-        Rectangle(p.screw_flat_half_height, 2 * half_span, align=(Align.MIN, Align.CENTER))
+        Rectangle(p.screw_flat_half_height, 2 * half_chord, align=(Align.MIN, Align.CENTER))
 
-        # Follow the circle's upper tangent until it meets the roof's clipped tip.
-        roof_clip = Plane.YZ.offset(roof_x)
+        # Follow the circle's upper tangent to the roof's clipped tip, then mirror.
+        roof_clip = Plane.YZ.offset(p.roof_x)
         contact = (180 - p.screw_tangent_angle) / 360  # Fraction of the full circle.
         with BuildLine():
             tangent = PolarLine(circle @ contact, length=roof_clip, direction=circle % contact)
             Polyline(tangent @ 1, roof_clip.origin, (0, 0), tangent @ 0)
-        roof_half = make_face()
-        mirror(roof_half, about=Plane.XZ)
+        upper_roof = make_face()
+        mirror(upper_roof, about=Plane.XZ)
     return profile.face()
-
-
-def nut_slot_face(p: KunParameters = KunParameters()) -> Face:
-    """Centered YZ rectangle: width along Y, height along Z; extrude along X."""
-    with BuildSketch(Plane.YZ, mode=Mode.PRIVATE) as profile:
-        Rectangle(p.nut_slot_width, p.nut_slot_height)
-    return Plane.YZ.from_local_coords(profile.face())

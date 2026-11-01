@@ -1,60 +1,46 @@
-"""Leg interface and installation results for rest implementations."""
+"""Leg interface: what a rest needs from any leg mechanism.
+
+A mount frame places a leg on a rest body: its origin is on the body's flat
+mounting face and its Z axis points into the body. Each leg implementation
+defines how X and Y orient it; ``rest.leg_mount`` builds frames from a facing
+direction. Dimensions are in millimeters.
+"""
 
 from typing import Protocol
 
-from build123d import Compound, Location, Part, RigidJoint
+from build123d import Compound, Location, Part
 
 
 class LegInstallation(Protocol):
-    """An installation site; concrete implementations define attachment methods."""
+    """One leg site on a rest body; every placement is in the body's local frame."""
 
     @property
-    def body(self) -> Part:
-        """Body containing the installation site."""
-        ...
-
-    @property
-    def local_placement(self) -> Location:
-        """Neutral leg source frame relative to the body's modeling frame."""
-        ...
-
-
-class Leg[InstallationT: LegInstallation](Protocol):
-    """Geometry and installation interface for a shoulder-rest implementation."""
-
-    @property
-    def part(self) -> Part:
-        """Printable child for export; position the whole assembly for modeling."""
-        ...
-
-    @property
-    def assembly(self) -> Compound:
-        """Printable leg and any hardware; position the complete assembly."""
-        ...
-
-    @property
-    def tool(self) -> Part:
-        """Cavity tool snapshot at the template assembly's current placement."""
+    def location(self) -> Location:
+        """Mount frame of this site."""
         ...
 
     @property
     def housing(self) -> Part:
-        """Required surrounding material guide; never automatically added to a rest."""
+        """Fresh guide of the material the site needs around its cavity."""
         ...
+
+    def leg(self) -> Compound:
+        """Fresh leg component at its neutral pose, seated in this site."""
+        ...
+
+
+class Leg[InstallationT: LegInstallation](Protocol):
+    """A leg design: a printable part and the cavity it needs in a rest body."""
 
     @property
-    def mount_joint(self) -> RigidJoint:
-        """Installation reference on the complete template assembly."""
+    def part(self) -> Part:
+        """Printable leg in its own modeling frame, for export."""
         ...
 
-    def install(
-        self, body: Part, *, at: Location, joint_label: str = "leg",
-    ) -> InstallationT:
-        """Modify body in place at a local frame and return an installation site.
+    def install(self, body: Part, *, at: Location) -> tuple[Part, InstallationT]:
+        """Return a copy of body with this leg's cavity cut at mount frame ``at``.
 
-        Preserve the body's modeling frame, placement, and existing site joints.
-        The caller transfers the Part for construction and final nesting.
-        Concrete installation methods choose which components to attach later.
-        Use joint_label to distinguish attachments from other installations.
+        ``body`` is in its local modeling frame and ``at`` is in those
+        coordinates. Also returns the site, for adding leg components later.
         """
         ...

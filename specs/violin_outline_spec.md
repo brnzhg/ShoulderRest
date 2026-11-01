@@ -1,13 +1,13 @@
-# Violin Outline
-Create a spline from the points below. Mirror this. 
-Then we want a class representing the left and right curves. 
-There should also be versions of these curves both offset inwards by a configurable offset.
-The class should additional have part extruded from a face created from the orignal two curves with horizontal lines attaching the top and bottom.
-This is extruded 38mm to create a simplified "Violin Block" to aid in visualizing the violin loation.
+# Violin outline
 
-There should also be an abstract version of this, that is holding a Violin Block and the 4 curves (2 of which are for constraining attachment to the rest).
+## Requirements
 
-## Spline Points:
+Create a spline from the traced points below and mirror it. Represent the left and right curves, plus versions of both offset inward by a configurable distance for constraining leg attachment. Close the original two curves with horizontal lines at the top and bottom, and extrude the face 38 mm into a simplified violin block that helps visualize the violin's location.
+
+Keep how the outline is traced separate from what the rest consumes: the block, the four curves and the mount frame.
+
+## Traced points
+
 (87.175, -56.570)
 (91.220, -49.3)
 (96.473, -37.724)
@@ -20,23 +20,18 @@ There should also be an abstract version of this, that is holding a Violin Block
 (43.630, 69.918)
 (18.865, 73.536)
 
-## Modeling interface and coordinate conventions
+## Interface and conventions
 
-- `ViolinOutline` is the interface; `SplineViolinOutline` interpolates the supplied right-hand points and mirrors across YZ. Custom points must have positive X and strictly increasing Y.
-- `left`, `right`, `left_attachment`, and `right_attachment` return independent open wires in local XY. All run from the lower-Y endpoint to the upper-Y endpoint.
-- `attachment_offset` is the normal inward distance in mm (class default 3; `build_violin_outline()` uses 6); zero uses the original curves. Offsets that fail or leave the footprint/cross the centerline are rejected. Open offset endpoints are not extended back to the horizontal end caps.
-- `block` uses the original curves and horizontal end caps, extruded from Z=0 toward +Z by `block_thickness` (default 38 mm). Its `mount_joint: RigidJoint` property uses `mount_location` and follows block placement.
-- `attachment_point(side, fraction)` chooses a leg center by normalized arc length, 0 through 1, on an attachment curve. Use these points as endpoints of a downstream `Polyline`; interior guide points remain parameters of the shoulder-rest design. Changing parameters requires rebuilding the guide; there is no persistent sketch constraint solver.
-- Construction curves stay in local XY when the visualization block moves. Model the rest in that frame and apply the block's placement to the finished rest for assembly. To place a local guide for display, use `guide.moved(violin.block.global_location)`.
+- `ViolinOutline(right, attachment_offset=6, block_thickness=38)` is built from any right-hand curve: an open `Edge` or `Wire` at positive X, running from its lower-Y end to its upper-Y end. It mirrors the curve across YZ. `build_violin_outline(points=TRACED_RIGHT_OUTLINE, ...)` in `spline_violin_outline.py` interpolates traced points, which must have positive X and strictly increasing Y.
+- `left`, `right`, `left_attachment` and `right_attachment` are open wires in local XY, all running from the lower-Y end to the upper-Y end. They stay in the local frame when the block moves.
+- `attachment_offset` is the normal inward distance in mm; zero uses the original curves. Offsets that fail, leave the footprint or cross the centerline are rejected. The open offset's endpoints are not extended back to the end caps.
+- `attachment_point(side, fraction)` picks a leg center by normalized arc length, from 0 to 1, on an attachment curve. Use these points as the ends of downstream guides; interior guide points remain design parameters. Changing parameters requires rebuilding the guide, since there is no persistent constraint solver.
+- `block` is the footprint (both halves closed by horizontal lines, built as a right half and mirrored) extruded from Z=0 toward +Z by `block_thickness`. To display a local guide with a placed block, use `guide.moved(violin.block.global_location)`.
 
-## Shared shoulder / violin / rest mount
+## Shared mount
 
-`mount_location` is a local `Location` at the midpoint of the original upper-Y closing line, on Z=0, with the outline's XYZ axes. For the bundled tracing this is `(0, 73.536, 0)`. It does not depend on attachment-curve inset or block thickness, and does not move when the block is placed.
+`mount_location` is a local `Location` at the midpoint of the original upper-Y closing line, on Z=0, with the outline's axes. For the bundled tracing it is `(0, 73.536, 0)`. It does not depend on the attachment offset or block thickness and does not move with the block. `mount_joint` is a rigid joint named `mount` on the block at that frame.
 
-`add_mount_joint(part, label="violin", offset=None)` creates and returns a `RigidJoint` on a Solid or Compound whose local modeling frame matches the outline. Its local joint frame is `mount_location * offset` (identity when omitted). The helper accounts for the part's existing placement and rejects duplicate joint labels. The block uses this same helper with label `mount` and no offset.
+`violin.position_on(shoulder)` connects the shoulder's violin joint to `mount_joint`, moving the block once. Rest bodies are modeled in the same local XY and declare which of their frames meets `mount_location`; see the [rest spec](rest_spec.md#fitting-to-the-shoulder).
 
-Call `violin.position_on(shoulder)` to move the block to the shoulder's violin attachment. This method is inherited by implementations that subclass `ViolinOutline`. Then use `rest.position_on(violin)` for the completed rest. Concrete geometry implementations handle any fitting needed during construction. Each placement method knows the matching joints and moves its receiver. Placement is applied once, before nesting assemblies; repeat it when the reference moves.
-
-A pure +Z joint offset of `h` mm places the rest at -Z by `h` relative to the violin, retaining identical XY alignment. General `Location` offsets are allowed, including tilt; these affect the resulting rest placement inversely when the joints are aligned. This represents a rigid adjustment only, not individual screw or leg geometry.
-
-Run `uv run python -m shoulder_rest.parts.violin_outline.spline_violin_outline` to preview the block, four curves, and an example guide polyline in OCP CAD Viewer.
+Preview: `uv run python -m shoulder_rest.parts.violin_outline.spline_violin_outline` shows the block, the four curves, an example guide polyline and the mount frame.

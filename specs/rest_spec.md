@@ -1,102 +1,77 @@
 # Rest geometry and assembly
 
-`parts/rest_geometry.py` defines the `RestGeometry` protocol. Its four properties are:
+## Interface
 
-- `part`: a finished, un-nested, `Part` containing one solid before leg cuts. It may remain in its local modeling frame or already carry its fitted pose.
-- `left_mount_joint`, `right_mount_joint`: rigid installation joints registered on `part`. Mount X follows the rod; mount Z points into the material.
-- `violin_joint`: a rigid joint registered on the same `part`, defining its violin attachment, including any spacing and tilt.
+`parts/rest/rest.py` defines the interface:
 
-The three joints must be distinct and belong to the final body, including after Boolean operations. Implementations choose their labels; `Rest` reads local frames directly from the typed properties before installation. `Rest` passes distinct installation labels (`left_leg` and `right_leg`) to the leg implementations; those implementations own any attachment joints and resolve label conflicts. Implementations can subclass `RestGeometry` or satisfy the protocol structurally by supplying its four properties.
+- `RestGeometry(part, left_mount, right_mount, violin_mount)`: a frozen record of a finished body, before leg cavities. `part` is one valid, un-nested solid in its local modeling frame. That frame shares XY with the violin outline, with the flat leg-mounting face at Z=0 and material toward -Z. The three frames are `Location`s in the same coordinates.
+- `leg_mount(center, facing)`: a mount frame at `center` on Z=0, with Z into the body (-Z) and mount +Y along `facing`. Hinge legs put their rod on mount X and their nose toward +Y, so passing the inward direction turns both noses inward.
+- `Rest(geometry, leg, right_leg=None)`: calls `leg.install(body, at=mount)` for the left side, then the right side, on the result. Each install returns a new body; nothing is modified in place. `right_leg` defaults to `leg`.
 
-`SimpleRestGeometry` in `parts/simple_rest.py` builds an inspectable rounded blank and its joints, without a leg dependency. `Rest(geometry, leg, right_leg=None)` consumes that interface. The supplied template is used independently for both sides unless a separate `right_leg` is supplied. Attachment settings such as angles and limits belong to the leg implementation.
+`Rest` owns the cut body (`part`) and an `assembly` holding it. The assembly's frame is the body's local frame. `left` and `right` are the installations returned by the legs, typed as the leg's installation type. They produce components in the body's frame, such as `rest.left.leg(angle=15)` or `rest.left.housing`, and `rest.add(component)` puts each into the assembly. Components can be added before or after positioning or nesting the rest. build123d rebuilds a compound at the origin when its children change, so `add` restores the pose of the assembly and of each ancestor.
 
-`Rest[InstallationT]` accepts `Leg[InstallationT]` for either side. Its `left` and `right` properties return `InstallationT`, and `installations` returns a tuple of those two results. `build_simple_rest` preserves the same parameter. Hinge templates infer `Rest[HingeLegInstallation]` without annotations or casts; different installation types require a shared interface or union. The common installation protocol describes only `body` and the neutral leg source frame `local_placement`; attachment methods belong to concrete implementations.
+`rest.left_mount_joint` and `rest.right_mount_joint` are rigid joints on the cut `part` at the two leg mount frames. Because they belong to the body, they follow it through positioning and nesting. `rest.violin_joint` lies on the whole assembly at `geometry.violin_mount`. `rest.position_on(violin)` connects `violin.mount_joint` to it, moving the whole rest once. Call it after `violin.position_on(shoulder)` and before nesting either in a scene, and again if the violin moves.
 
-## Contouring and placement
+## Fitting to the shoulder
 
-A geometry implementation owns the relationship between its body, shoulder, and violin. It can position the references, subtract the shoulder from an oversized blank, then define the three joints on the finished body. For a blank modeled locally and positioned by `pose`, transform the shoulder's world-space cutter into the blank frame:
+A rest design never moves the shoulder or violin. `Shoulder.cutter(violin_mount)` returns the extended cast in the body's local frame. It is placed so that the shoulder's `violin_location` coincides with the body's `violin_mount`, which is exactly where the body lands after positioning. Subtract it from an oversized blank, then build the `RestGeometry` from the result.
 
-```python
-local_tool = shoulder.extended.moved(pose.inverse())
-body = (local_blank - local_tool).moved(pose)
-# Define final joints with world locations pose * local_attachment_frame.
-```
-
-Alternatively, perform the Boolean in a common world frame and define joints in that same frame. The resulting part and its registered joints must describe the same placement. The geometry implementation can use those joints to position reference parts before handing the body to `Rest`. Construction does not rely on carrying those joints or connections through Boolean cuts.
-
-`Rest` snapshots the three `relative_location` frames and passes the original body to `leg.install(body, at=local_frame, joint_label=...)`. Both installations modify the same `Part`, retaining its modeling frame and placement. There is no defensive body copy, joint-dictionary lookup, or type cast in `Rest`.
-
-After both installations, `Rest` creates its public mount joints on the final body. Installations preserve existing site joints through subsequent cuts. `Rest` does not call attachment methods; the caller selects components and parameters through the concrete descriptors, for example `rest.left.attach_to(rest.assembly, angle=15)` and optionally `rest.left.attach_housing_to(rest.assembly)`.
-
-Supplying a geometry transfers its body for construction and final assembly nesting. Leg implementations modify the supplied `Part` in place.
-
-The `assembly` initially contains only the cut `part`; attachment calls add components explicitly. Its typed `violin_joint` reproduces the geometry's violin frame on the **whole assembly**, preserving the initial fit. No additional placement step is needed when the geometry was already positioned.
-
-Typed joint properties retain references created after the final cut. Later placement updates the existing joints through their owning parts.
-
-Use `violin.position_on(shoulder)` to establish the violin pose and `rest.position_on(violin)` to align the completed rest. Any fitting needed before leg installation belongs inside the concrete geometry implementation. The placement methods connect the matching joints internally and move only their receiver. Call them before scene nesting; they can be repeated while the parts remain top-level. Connections do not continuously track later movement. Move the whole rest assembly to keep its children together.
-
-`left_mount_joint` and `right_mount_joint` belong to the printable body child. Their build123d locations are in rest assembly coordinates; apply the assembly's global placement for world coordinates. `installations` retains the concrete site descriptors; use `rest.part` for the final body. Hinge descriptors are frozen and provide repeatable leg/housing attachment methods plus world-positioned tool/housing snapshots.
+`violin.mount_location * Pos(0, 0, gap)` places the rest `gap` mm below the violin, with identical XY alignment. A general offset, including tilt, moves the rest by its inverse relative to the violin. The fit is fixed at construction: rebuild the geometry after changing the shoulder's violin placement or the gap.
 
 ## Print orientation
 
-The rest body is PETG and is always printed with the flat leg-mounting face against the bed. Preserve this plane when shaping the body. In the body's local modeling frame this face is Z=0 and the material extends toward -Z, so the print build direction is local -Z. Undo any fitted assembly placement, then turn the body over and place the mounting face on the bed; the shoulder-fitting preview is not a print pose.
+The rest body is PETG and is always printed with the flat leg-mounting face against the bed. Preserve this plane when shaping the body. In the local modeling frame this face is Z=0 and material extends toward -Z, so the print build direction is local -Z. Export `rest.part` in its local frame, turn it over, and place the mounting face on the bed; the fitted scene is not a print pose.
 
-The hinge coupon export follows the same convention: rotate its source geometry 180° about X and translate its mounting face to print Z=0. STEP exports retain the modeling pose; coupon STLs are oriented for printing.
+The hinge coupon export follows the same convention: it rotates the source geometry 180° about X and translates its mounting face to print Z=0. STEP exports keep the modeling pose; coupon STLs are oriented for printing.
 
-## Rounded bar geometry
+## Bar rests
 
-`build_simple_rest(violin, leg, parameters, right_leg=None)` returns a `Rest` body and installation sites in the outline's local frame, ready for attachment and positioning:
+`parts/rest/bar_rest.py` builds rounded bars between two leg centers. `BarRestParameters` sets `width` (30), `thickness` (12), `violin_gap` (12) and the arc-length fractions `left_fraction` and `right_fraction` (0.4 each) on the attachment curves.
 
-- Leg centers are sampled at arc-length fractions 0.25 on the left attachment curve and 0.60 on the right.
-- A straight slot profile joins the centers with semicircular ends, extruded from Z=0 toward -Z. Default width is 44 mm and thickness is 12 mm.
-- Left and right mounts lie at the sampled centers on Z=0. Mount Z points into the body (-Z); opposite X directions across the bar orient both leg noses inward.
-- The violin mount uses the outline's shared frame with a +12 mm local Z offset, placing the bar's top 12 mm below the violin when positioned.
+- `bar_rest_geometry(violin, parameters)`: a `SlotCenterToCenter` footprint joining the leg centers, extruded from Z=0 to `-thickness`. It has no shoulder contour.
+- `contoured_bar_rest_geometry(violin, shoulder, parameters)`: `ContouredBarRestParameters` adds `contact_depth` (80) and `contact_side` (`"right"`). A plane through the midpoint, perpendicular to the line between leg centers, splits the footprint. The contact half is extruded to `-contact_depth`, and the shoulder cutter trims it. The cut must remove material and leave one valid solid; other placements or dimensions can leave an untrimmed end or cut into the mounting region.
 
-The default bar retains the bundled hinge legs' complete housing guides after cutting. Other dimensions or leg implementations require checking remaining material. Angle limits describe kinematics, not collision-free articulation.
+In both, the legs face each other along the bar. The default dimensions retain the hinge legs' full housing guides; check the remaining material after other changes.
 
-The body has neither an S-shaped path nor a shoulder contact contour. The preview positions it relative to the bundled shoulder but does not fit the bar to the cast. For a contoured implementation, transform the positioned shoulder's `extended` cutter into the body's modeling frame and finish shaping before handing the finished geometry to `Rest`.
+## W rest
 
-Preview: `uv run python -m shoulder_rest.parts.simple_rest`.
+`parts/rest/w_rest.py` builds a W-shaped body with `w_rest_geometry(violin, shoulder, parameters)`. `WRestParameters` groups its settings as `path`, `head` and `tail`, plus `top_radius` (1), `violin_gap` (12) and the leg-center fractions `left_fraction` (0.46) and `right_fraction` (0.4).
 
-## Half-bar shoulder contour
+### Centerline (`WPathParameters`)
 
-`ContouredRestGeometry(violin, shoulder, parameters)` in `parts/contoured_rest.py` is a second implementation of the same four-property interface. It calls `violin.position_on(shoulder)` during construction, so both references must remain un-nested. No leg implementation is involved in shaping.
+The centerline runs right to left in violin-local XY. It starts at the right leg center and follows `strokes`, by default `Stroke(40, 10)`, `Stroke(56, -20)` and `Stroke(36, 10)`. Each stroke has a length and an absolute angle measured from leftward (-X): zero points left, positive slopes toward -Y and negative toward +Y. A final straight tail stroke reaches the left leg center. `right_extend` (20) and `left_extend` (10) continue the first stroke and the tail stroke past their leg centers, so both centers lie on straight runs.
 
-`ContouredRestParameters` extends `SimpleRestParameters` with `contact_depth=80` mm and `contact_side="right"`. The whole slot footprint is extruded to the base thickness. A plane through the midpoint, perpendicular to the line between leg centers, divides the footprint into equal halves. The selected half is extruded from Z=0 to `-contact_depth` and united with the bar.
+`bend_radii` (40, 10) round the bends between consecutive head strokes, in travel order; zero keeps a bend sharp. The bend into the tail is always sharp. `FilletPolyline` builds the whole path.
 
-The blank receives a violin joint through `violin.add_mount_joint(blank, offset=Location((0, 0, violin_gap)))`. Connecting `violin.mount_joint` to this joint establishes the fitted pose. A private `BuildPart` inserts the blank at the local origin and subtracts `shoulder.extended` transformed into that same local frame. All three joints are created on the cut body in local coordinates, then the body is placed at the fitted pose. Passing it to `Rest` retains this fit without `rest.position_on(...)`.
+Front is the left side of the right-to-left travel, usually -Y; back is the right side.
 
-The cut must remove material and leave one valid solid. The example's right half is fully trimmed by the shoulder surface; other placements or dimensions can leave an untrimmed end or cut into the mounting region. Inspect the preview after changes. This is a contouring example, without padding allowance or automatic leg-housing protection. Rebuild after changing the fit; moving the assembled rest does not recompute its contour.
+### Head (`WHeadParameters`)
 
-Preview: `uv run python -m shoulder_rest.parts.contoured_rest`.
+The head is a band around the head strokes, `front_width` (18) to the front and `back_width` (16) to the back, closed flat at both ends. Its left end is the sharp bend into the tail. It is extruded to the oversized `depth` (80), which must exceed the tail thickness, and cut with the shoulder cutter. Shape history captures the contact faces the cut creates, planar ones included, and follows them through later cuts and fillets.
 
-## W rest geometry
+`left_cap` and `right_cap` optionally trim each end with a `WHeadCapParameters` after the shoulder cut, before the tail is joined:
 
-`parts/wrest.py` builds a W centerline in the violin's local XY plane from the right attachment toward the left. `w1`, `w2`, and `w3` are the lengths of its three middle strokes. Each signed angle is an absolute offset from `(-1, 0)`, independent of the preceding stroke: zero points left, positive slopes down, and negative slopes up. A final straight stroke reaches the left attachment. `right_extend` continues the first stroke past the right attachment, and `left_extend` continues the final stroke past the left attachment.
+- The cap line crosses the end's centerline at Z=`-height` (12). At signed distance `s` toward the front, it is at Z=`-height - s*tan(angle)`. Zero `angle` (default 10°) is level, and a positive angle lowers the front. The angle must be strictly between -90° and 90°, and the line must stay below the mounting face.
+- The cutting plane contains that line and the end's inward tangent. A box below the plane removes material up to a stop plane `depth` (20) mm inward. The left cap follows stroke 3 inward, independent of the tail angle.
+- `blend_radius` (10) first rounds the cap-to-step join, if the cut left a step, then the join between the trim and the shoulder contact faces. Zero leaves the cut sharp.
 
-`first_radius` and `second_radius` round the two bends inside the head in travel order. Each can differ; zero keeps a sharp bend. The junction between stroke 3 and the tail is always sharp. The attachments lie on straight portions of the outer strokes.
+A cap that misses the head, reaches Z=0, disconnects the head, has no shoulder join to blend, or cannot take its blend radius raises an error naming its end. The radius is never reduced automatically.
 
-The final straight stroke is the tail: a bar with total width `tail_width`, extruded from Z=0 to `-tail_thickness`. Its free end closes flat at the centerline tip, perpendicular to the tail stroke. The head contains the first three strokes and their two internal fillets. Its front and back boundaries are offset from the centerline by `head_front_width` and `head_back_width`, respectively. Both ends close flat, perpendicular to their head stroke; the left end is at the unrounded end of stroke 3. Front is the left side of the right-to-left path, usually lower Y; back is the right side, usually upper Y. `head_depth` is the total oversized head depth below Z=0 and must exceed `tail_thickness`.
+### Tail (`WTailParameters`)
 
-`head_corner_radius` (default 4 mm; zero disables it) rounds the exposed upright corner edges at the head ends after shoulder contouring, cap cuts, and joining the tail. At the tail junction, these edges stop at the underside of the tail; the connected footprint above that face stays intact.
+The tail is `width` (24) wide in total and `thickness` (12) deep. Its sides leave the head's end corners along two cubic Bézier curves that reach the straight tail sides `taper_length` (30) mm along the tail; the taper must be shorter than the tail stroke. Each curve is tangent to the head stroke at its start and to the tail stroke at its end. `taper_handle_ratio` (1/3) sets both handles as a fraction of the taper length; larger values hold the end directions longer. The free end closes flat, perpendicular to the tail, with `corner_radius` (4) rounding its two corners in the footprint sketch.
 
-`head_bottom_radius` (default 2 mm; zero disables it) rounds the outer perimeter of the combined shoulder-contact and cap surfaces after the tail is joined and head corners are rounded. Internal seams between these surfaces are excluded. Fillet feasibility depends on the fit: the current capped preview supports 2 mm, while the uncapped preview fit requires adjusting the contour/caps or disabling this fillet.
+### Joining and rounding
 
-`tail_corner_radius` (default 4 mm; zero disables it) independently rounds the two upright corners at the tail's free end. The flat portion of the end remains at the centerline tip; the fillets remove material without extending the tail.
+After capping, every head side wall still reaches Z=0, so the head faces entirely below Z=0 form its bottom: shoulder contact, caps and blends. The tail is then joined. Rounding follows, in this order:
 
-`tail_bottom_radius` and `top_radius` (each default 1 mm; zero disables either) round the tail underside perimeter and the entire rest's Z=0 top perimeter, respectively. These fillets run on the joined body after the head bottom fillet and before leg installation. The tail underside includes its concave junction with the deeper head.
+1. `head.corner_radius` (4) rounds the upright corners at both head ends. At the left end the tail covers the corners down to its underside, where head and tail meet tangentially, so only the edges below it are rounded.
+2. `head.bottom_radius` (2) rounds the outline where the bottom faces meet the side walls, excluding seams within the bottom.
+3. `tail.bottom_radius` (1) rounds the outline of the faces on the tail's underside plane, including its concave junction with the deeper head.
+4. `top_radius` (1) rounds the outline of the Z=0 mounting face.
 
-`WRestGeometry` places the violin on the shoulder, cuts only the head with `shoulder.extended` in the blank's local frame, then joins the untouched tail. Two cubic Bézier curves connect the head end corners to the straight tail sides, tangent to the head stroke at the head and to the tail stroke at the other end. `tail_taper_length` (default 30 mm) measures the transition along the tail centerline and must be shorter than that stroke. `tail_taper_handle_ratio` (default 1/3) sets both curves' tangent handle lengths as a fraction of the taper length; larger values hold the endpoint directions longer. The tail and head share the head's flat end boundary. Inspect the fit where the head extends beyond the shoulder cutter: material outside its footprint retains the full oversized depth.
+Zero disables any of these fillets. Whether a fillet succeeds depends on the fit: the capped preview supports a 2 mm head bottom radius, while the uncapped fit needs a contour or cap adjustment, or `head.bottom_radius=0`. Material outside the shoulder cutter keeps the full oversized depth, so inspect the fit where the head extends beyond the cast.
 
-Both leg mounts are created on the finished body at their respective violin attachment points on Z=0 (left fraction 0.46, right fraction 0.4). Mount X is perpendicular to that side's outward centerline tangent, matching the rod direction used by the straight bar; mount Z points into the body. The two X directions differ because the outer strokes have different angles. The violin joint and both leg mounts belong to the body, which stays in violin-local XY for inspection. `Rest` installs the legs using those local frames; `rest.position_on(violin)` then connects the assembly's violin joint and moves the whole rest to the fitted pose. Call it before nesting the rest and violin in a scene.
+### Frames
 
-### Optional head caps
-
-`WRestParameters.left_cap` and `right_cap` accept separate frozen `WHeadCapParameters` instances; `None` disables that end. The left head end is the sharp transition from stroke 3 to the tail. The right head end is the extended tip of the first stroke. Caps are applied after shoulder contouring and before joining the tail.
-
-Each cap defines `angle` (default 10°), `height` (12 mm), `depth` (20 mm), and `blend_radius` (10 mm). Its end-face line passes through the end centerline at Z=`-height`. At signed distance `s` toward the front, it is Z=`-height - s*tan(angle)`. Thus zero is parallel to the Z=0 bottom segment, and a positive angle places the front at a more negative Z than the back. The angle must be strictly between -90° and 90°, and the line and cut must stay clear of the mounting face.
-
-The cutting plane contains that line and the head's inward end tangent; its normal lies in the end face. A straight extrusion removes material toward -Z for the fixed `depth`, measured along that tangent. The left cap follows stroke 3 inward; its frame is independent of the tail angle. The cut can create a step at its depth limit. Fillets round both the cap-to-step join and the step-to-shoulder join, or the direct cap-to-shoulder intersection when the planes meet without a step. build123d's `ShapeHistory` follows the captured shoulder faces through subsequent cuts and fillets to select the blend edges. The tail is added afterward.
-
-Setting `blend_radius=0` leaves sharp cuts for inspection. A cap that misses the head, reaches Z=0, disconnects the head, has no shoulder join to blend, or cannot accommodate the requested radius raises an error identifying the end. Adjust the dimensions and inspect the CAD preview; the radius is not reduced automatically.
+Both leg mounts sit at their leg centers on Z=0 and face inward along their outer strokes, so their rod axes are perpendicular to those strokes. Because the outer strokes have different angles, the two mount X directions differ. The violin mount is `violin.mount_location` raised by `violin_gap`.
