@@ -13,7 +13,7 @@ from math import cos, isfinite, radians, sin, tan
 from build123d import (
     Align, Axis, Bezier, Box, BuildLine, BuildSketch, Compound, Edge, Face,
     FilletPolyline, GeomType, Line, Location, Mode, Part, Plane, Polyline, Pos,
-    Select, Shape, Side, Sketch, Vector, Wire, extrude, fillet, make_face,
+    Select, Shape, Side, Sketch, Vector, Wire, extrude, fillet, make_face, section,
 )
 from build123d.topology import ShapeHistory
 
@@ -92,12 +92,52 @@ class WHeadCapParameters:
 
 
 @dataclass(frozen=True)
+class WStripeParameters:
+    """Transverse rubber-band grooves, evenly spaced along the rounded head path.
+
+    ``start`` and ``end`` are arc-length fractions from the extended right tip
+    (0) to the head/tail junction (1). One stripe sits midway between them.
+    Width and depth are in mm; depth is an inward offset in each transverse
+    section, so it varies slightly across the width on sloping surfaces.
+    ``edge_radius`` rounds the exposed lips, leaving the groove floor sharp.
+    The side grooves stop below the top fillet, leaving ``top_clearance`` mm
+    of wall below it so the mounting face remains uninterrupted.
+
+    Inspect the fit at caps and tight bends: a straight groove can run out of
+    material there. Failed cuts/fillets raise rather than changing dimensions.
+    """
+
+    start: float = 0.25
+    end: float = 0.85
+    count: int = 5
+    width: float = 3
+    depth: float = 1
+    edge_radius: float = 0.2
+    top_clearance: float = 1
+
+    def __post_init__(self) -> None:
+        if not (isfinite(self.start) and isfinite(self.end) and 0 < self.start <= self.end < 1):
+            raise ValueError("Stripe fractions must satisfy 0 < start <= end < 1")
+        if isinstance(self.count, bool) or not isinstance(self.count, int) or self.count < 1:
+            raise ValueError("Stripe count must be a positive integer; use stripes=None to disable")
+        if not all(isfinite(v) and v > 0 for v in (self.width, self.depth, self.top_clearance)):
+            raise ValueError("Stripe width, depth and top clearance must be finite and positive")
+        if not isfinite(self.edge_radius) or not 0 < self.edge_radius < min(self.depth, self.width / 2):
+            raise ValueError("Stripe edge radius must be positive and smaller than depth and half width")
+        if self.top_clearance <= self.edge_radius:
+            raise ValueError("Stripe top clearance must exceed its edge radius")
+        if self.count > 1 and self.start == self.end:
+            raise ValueError("Multiple stripes need distinct start and end fractions")
+
+
+@dataclass(frozen=True)
 class WHeadParameters:
     """The head band around the head strokes, cut to the shoulder.
 
     Widths are measured from the centerline. ``depth`` is the oversized depth
     below Z=0 before the shoulder cut. ``corner_radius`` rounds the upright end
     corners and ``bottom_radius`` the outline of the shoulder and cap surfaces.
+    ``stripes`` optionally cuts rubber-band grooves after the outer fillets.
     """
 
     front_width: float = 18
@@ -107,6 +147,7 @@ class WHeadParameters:
     bottom_radius: float = 2
     left_cap: WHeadCapParameters | None = None
     right_cap: WHeadCapParameters | None = None
+    stripes: WStripeParameters | None = None
 
     def __post_init__(self) -> None:
         if not all(isfinite(v) and v > 0 for v in (self.front_width, self.back_width, self.depth)):
@@ -168,7 +209,7 @@ class WRestParameters:
 def w_rest_geometry(
     violin: ViolinOutline, shoulder: Shoulder, p: WRestParameters = WRestParameters(),
 ) -> RestGeometry:
-    """Cut the head to the shoulder and cap its ends, join the tail, then round edges.
+    """Fit and cap the head, join the tail, round outer edges, then cut optional stripes.
 
     Whether the fillets succeed depends on the fit; radii are never reduced
     automatically. For example, the uncapped default fit cannot take the head
@@ -206,6 +247,8 @@ def w_rest_geometry(
     tail_bottom = _faces_on(body, Plane.XY.offset(-p.tail.thickness))
     body = _fillet_outline(body, tail_bottom, p.tail.bottom_radius, "Tail bottom fillet")
     body = _fillet_outline(body, _faces_on(body, Plane.XY), p.top_radius, "Top fillet")
+    if p.head.stripes is not None:
+        body = _stripe_head(body, head_path, p.head.stripes, p.top_radius)
     body = single_solid(body, "W rest body must be one valid solid")
     body.label = "W rest body"
 
@@ -216,6 +259,75 @@ def w_rest_geometry(
         right_mount=leg_mount(right, facing=centerline % 0),
         violin_mount=violin_mount,
     )
+
+
+def _stripe_head(body: Part, path: Wire, stripes: WStripeParameters, top_radius: float) -> Part:
+    """Cut straight section-shaped grooves after the outer fillets, then round their lips."""
+    half_span = stripes.width / 2 + stripes.edge_radius
+    if min(stripes.start, 1 - stripes.end) * path.length <= half_span:
+        raise ValueError("Stripes must clear both head ends by half their width plus edge radius")
+    if stripes.count > 1:
+        spacing = (stripes.end - stripes.start) * path.length / (stripes.count - 1)
+        if spacing <= 2 * half_span:
+            raise ValueError("Stripe spacing must exceed width plus twice the edge radius")
+    # Always section the finished, unstriped body, not a preceding groove.
+    original = body
+    reach = 2 * body.bounding_box().diagonal
+    ceiling = -top_radius - stripes.top_clearance
+    below_top = Pos(0, 0, ceiling) * Box(
+        reach, reach, reach, align=(Align.CENTER, Align.CENTER, Align.MAX), mode=Mode.PRIVATE,
+    )
+    for index in range(stripes.count):
+        fraction = (stripes.start + stripes.end) / 2 if stripes.count == 1 else (
+            stripes.start + (stripes.end - stripes.start) * index / (stripes.count - 1)
+        )
+        plane = Plane(origin=path @ fraction, x_dir=(0, 0, 1), z_dir=path % fraction)
+        name = f"Stripe {index + 1} at head fraction {fraction:.3f}"
+        try:
+            cutter = _stripe_cutter(original, plane, stripes, reach) & below_top
+            cut = body - cutter
+            single_solid(cut, f"{name} must leave one valid solid")
+            outer = _descendants(body.faces(), cut)
+            outer_set = set(outer)
+            groove = [face for face in cut.faces() if face not in outer_set]
+            # History separates exposed lips from internal groove-floor edges.
+            body = _fillet(cut, _edges_between(outer, groove), stripes.edge_radius, name)
+        except (ValueError, RuntimeError) as error:
+            raise ValueError(f"{name}: {error}; adjust stripe placement or dimensions") from error
+    return body
+
+
+def _stripe_cutter(body: Part, plane: Plane, stripes: WStripeParameters, reach: float) -> Part:
+    """A wide transverse slab minus an inset core, returned in the body's frame.
+
+    Extending the core above Z=0 removes its top offset from the cut. Extending
+    the slab outside the body avoids slivers where the contour slopes along
+    the centerline. The caller clips the side openings below the mounting face.
+    """
+    cross_section = section(body, plane)
+    if len(cross_section.faces()) != 1:
+        raise ValueError("Stripe plane must cross a single head section")
+    inset = cross_section.faces()[0].outer_wire().offset_2d(-stripes.depth)
+    sides_and_bottom = Wire([
+        edge for edge in inset.edges()
+        if edge.bounding_box().min.Z < -stripes.depth - 1e-6
+    ])
+    a, b = sides_and_bottom @ 0, sides_and_bottom @ 1
+    if abs(a.Z + stripes.depth) > 1e-5 or abs(b.Z + stripes.depth) > 1e-5:
+        raise ValueError("Stripe inset must retain an open path between the two top sides")
+    upper_a, upper_b = Vector(a.X, a.Y, reach), Vector(b.X, b.Y, reach)
+    core = Face(Wire([
+        *sides_and_bottom.edges(), Edge.make_line(a, upper_a),
+        Edge.make_line(upper_a, upper_b), Edge.make_line(upper_b, b),
+    ]))
+    slab = extrude(
+        Face.make_rect(reach, reach, plane), amount=stripes.width / 2,
+        both=True, dir=plane.z_dir, mode=Mode.PRIVATE,
+    )
+    protected = extrude(
+        core, amount=stripes.width, both=True, dir=plane.z_dir, mode=Mode.PRIVATE,
+    )
+    return slab - protected
 
 
 def _front(direction: Vector) -> Vector:
@@ -399,7 +511,7 @@ def _edges_between(faces: list[Face], others: list[Face]) -> list[Edge]:
 def _descendants(faces: Iterable[Face], result: Shape) -> list[Face]:
     """Faces of an operation's result that are, or were rebuilt from, the given input faces.
 
-    Only the head bottom needs this, to survive the tail join and corner fillets.
+    Used for the head bottom through joins/fillets and for stripe opening edges.
     """
     history = ShapeHistory.of(result)
     if history is None:
@@ -426,6 +538,7 @@ if __name__ == "__main__":
     geometry = w_rest_geometry(violin, shoulder, WRestParameters(head=WHeadParameters(
         left_cap=WHeadCapParameters(angle=24, height=34, depth=30),
         right_cap=WHeadCapParameters(angle=10, height=30, depth=20),
+        stripes=WStripeParameters(),
     )))
     # show(geometry.part)  # Inspect the body in its local frame.
     rest = Rest(geometry, HingeLeg(rod_retention=RodRetentionParameters()))
