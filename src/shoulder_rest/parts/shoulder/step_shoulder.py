@@ -6,7 +6,6 @@ from build123d import Location, Pos, Rotation, VectorLike, import_step
 
 from .shoulder import Shoulder
 
-
 CAST_LOCATION = Location((0, 0, 0), (30, 30, -5))
 """Maps the bundled STEP files' scan frame into the corrected shoulder frame."""
 

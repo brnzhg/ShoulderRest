@@ -21,8 +21,20 @@ module-root = "src"
 dev = [
     "mypy>=2.3.1",
     "ocp-vscode>=4.1.0",
+    "ruff>=0.17.3",
 ]
 
 [[tool.mypy.overrides]]
 module = ["ocp_vscode"]
 ignore_missing_imports = true
+
+[tool.ruff]
+line-length = 100
+
+[tool.ruff.lint]
+ignore = [
+    "I001",    # Its one-name-per-line wrapping cannot be configured; keep imports compact and sorted.
+    "B008",    # Frozen parameter dataclasses are safe shared defaults.
+    "RUF009",  # Same, for dataclass fields.
+    "SIM117",  # Nested builder and Locations contexts read better than one long with.
+]

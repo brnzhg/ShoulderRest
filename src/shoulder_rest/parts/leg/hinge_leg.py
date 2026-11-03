@@ -24,6 +24,7 @@ from build123d import (
 )
 
 from shoulder_rest.parts._validation import single_solid
+
 from .kun import KunParameters, screw_hole_face
 from .rod_retention import RodRetentionParameters, _retention_bumps
 

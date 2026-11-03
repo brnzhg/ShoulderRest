@@ -21,9 +21,9 @@ from OCP.Standard import Standard_Failure  # type: ignore[import-untyped]
 from OCP.StdFail import StdFail_NotDone  # type: ignore[import-untyped]
 
 from shoulder_rest.parts._validation import single_solid
+from shoulder_rest.parts.rest import RestGeometry, leg_mount
 from shoulder_rest.parts.shoulder import Shoulder
 from shoulder_rest.parts.violin_outline import ViolinOutline
-from shoulder_rest.parts.rest import RestGeometry, leg_mount
 
 
 @dataclass(frozen=True)
@@ -98,10 +98,13 @@ class WHeadCapParameters:
 class WStripeParameters:
     """Transverse rubber-band grooves, evenly spaced along the rounded head path.
 
+    Each groove crosses the bottom and runs up both sides, opening through the
+    top edges as notches.
+
     ``start`` and ``end`` are arc-length fractions from the extended right tip
     (0) to the head/tail junction (1). One stripe sits midway between them.
-    Width and depth are in mm. Each groove floor is a surface offset inward
-    from the head by ``depth``, including its bottom fillets.
+    Width, depth and radii are in mm. Each groove floor is a surface offset
+    inward from the head by ``depth``, including its bottom fillets.
     ``edge_radius`` rounds the exposed lips. ``top_radius`` rounds the groove
     floor onto the top face at each side notch. The bottom turns follow the
     inset head contour; the top stays flat between the two notches.
@@ -141,7 +144,7 @@ class WHeadParameters:
     Widths are measured from the centerline. ``depth`` is the oversized depth
     below Z=0 before the shoulder cut. ``corner_radius`` rounds the upright end
     corners and ``bottom_radius`` the outline of the shoulder and cap surfaces.
-    ``stripes`` optionally cuts rubber-band grooves after the bottom fillets.
+    ``stripes`` cuts rubber-band grooves after the bottom fillets; ``None`` omits them.
     """
 
     front_width: float = 18

@@ -55,7 +55,7 @@ violin.position_on(shoulder)
 geometry = w_rest_geometry(violin, shoulder, WRestParameters(head=WHeadParameters(
     left_cap=WHeadCapParameters(angle=24, height=34, depth=30),
     right_cap=WHeadCapParameters(angle=10, height=30, depth=20),
-    stripes=WStripeParameters(start=0.25, end=0.85, count=5, depth=1),
+    stripes=WStripeParameters(),
 )))
 rest = Rest(geometry, HingeLeg())
 rest.add(rest.left.leg(angle=20))
@@ -65,15 +65,6 @@ rest.position_on(violin)
 
 scene = Compound(children=[shoulder.assembly, violin.block, rest.assembly])
 ```
-
-`WHeadParameters.stripes` enables rubber-band grooves across the bottom and up both sides,
-opening through the top edges as notches. The top stays flat between the notches.
-Start and end are fractions of the rounded head centerline, from the extended right tip
-to the head/tail junction. `width`, `depth`, `edge_radius`, and stripe `top_radius`
-are in mm. `depth` is measured inward normal to the bottom and side surfaces.
-`edge_radius` rounds the openings; stripe `top_radius` rounds the groove
-floor onto the top face. Use `stripes=None` to omit them.
-Inspect grooves near caps and bends; unsuitable cuts or fillets raise an error.
 
 `rest.part` is the printable body. It is printed with its flat mounting face on the bed, so export it in its local frame and turn it over.
 

@@ -1,12 +1,12 @@
 """Violin outline interpolated through a traced right-hand half; run to preview it."""
 
 from collections.abc import Sequence
+from itertools import pairwise
 from math import isfinite
 
 from build123d import Spline
 
 from .violin_outline import ViolinOutline
-
 
 TRACED_RIGHT_OUTLINE = (
     (87.175, -56.570),
@@ -31,7 +31,7 @@ def build_violin_outline(
     """Interpolate XY points with positive X and strictly increasing Y."""
     if len(points) < 2 or not all(isfinite(x) and isfinite(y) and x > 0 for x, y in points):
         raise ValueError("Provide at least two finite XY points with positive X")
-    if any(a[1] >= b[1] for a, b in zip(points, points[1:])):
+    if any(a[1] >= b[1] for a, b in pairwise(points)):
         raise ValueError("Outline points must have strictly increasing Y")
     return ViolinOutline(
         Spline(*points),
