@@ -72,11 +72,12 @@ scene = Compound(children=[shoulder.assembly, violin.block, rest.assembly])
 
 - **A new rest shape** is a function that returns a `RestGeometry`. Subtract `shoulder.cutter(violin_mount)` to fit the shoulder.
 - **A new leg mechanism** implements the `Leg` and `LegInstallation` protocols.
+- **A new engraving** is an `Engraving` of any flat sketch and a depth; `text_engraving` builds one from text. A rest design cuts it with `engrave(body, engraving, face, at=frame)`.
 - **A different violin or shoulder** is a `ViolinOutline` built from any right-hand outline curve, or a `Shoulder` built from cast shapes and a violin location.
 
 ## Repository layout
 
-- `src/shoulder_rest/parts/`: one subpackage per interface (`shoulder/`, `violin_outline/`, `leg/`, `rest/`). Each package's `__init__` exposes its interface; implementation modules sit beside it.
+- `src/shoulder_rest/parts/`: one subpackage per interface (`shoulder/`, `violin_outline/`, `leg/`, `rest/`, `engraving/`). Each package's `__init__` exposes its interface; implementation modules sit beside it.
 - `src/shoulder_rest/assets/`: input geometry bundled with the package.
 - `assets/`: reference material, such as the original STEP solids.
 - `examples/`: standalone scripts, such as the rod-retention test coupon.

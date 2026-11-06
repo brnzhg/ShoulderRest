@@ -21,6 +21,7 @@ from OCP.Standard import Standard_Failure  # type: ignore[import-untyped]
 from OCP.StdFail import StdFail_NotDone  # type: ignore[import-untyped]
 
 from shoulder_rest.parts._validation import single_solid
+from shoulder_rest.parts.engraving import Engraving, engrave
 from shoulder_rest.parts.rest import RestGeometry, leg_mount
 from shoulder_rest.parts.shoulder import Shoulder
 from shoulder_rest.parts.violin_outline import ViolinOutline
@@ -176,6 +177,13 @@ class WTailParameters:
     ``taper_length`` mm along the tail; ``taper_handle_ratio`` sets their
     tangent handles as a fraction of that length. ``corner_radius`` rounds the
     free end's corners and ``bottom_radius`` the underside outline.
+
+    ``engraving`` is cut into the flat underside, which faces up when the rest
+    prints, after every fillet. ``engraving_start`` places its origin in mm:
+    x along the tail from the end of the taper toward the free end, y across
+    it toward the back. Viewed from below, the design reads along x. The
+    cavity of a leg mounted on the tail sits above part of this face, so keep
+    the engraving shallow.
     """
 
     width: float = 24
@@ -184,6 +192,8 @@ class WTailParameters:
     taper_handle_ratio: float = 1 / 3
     corner_radius: float = 4
     bottom_radius: float = 1
+    engraving: Engraving | None = None
+    engraving_start: tuple[float, float] = (2, 0)
 
     def __post_init__(self) -> None:
         if not all(isfinite(v) and v > 0 for v in (self.width, self.thickness, self.taper_length)):
@@ -192,6 +202,10 @@ class WTailParameters:
             raise ValueError("Tail taper handle ratio must be in (0, 1]")
         if not all(isfinite(v) and v >= 0 for v in (self.corner_radius, self.bottom_radius)):
             raise ValueError("Tail radii must be finite and nonnegative")
+        if not all(isfinite(v) for v in self.engraving_start):
+            raise ValueError("Tail engraving start must be finite")
+        if self.engraving is not None and self.engraving.depth >= self.thickness:
+            raise ValueError("Tail engraving must be shallower than the tail")
 
 
 @dataclass(frozen=True)
@@ -258,6 +272,8 @@ def w_rest_geometry(
     else:
         body = _fillet_outline(body, _faces_on(body, Plane.XY), p.top_radius, "Top fillet")
     body = single_solid(body, "W rest body must be one valid solid")
+    if p.tail.engraving is not None:
+        body = _engrave_tail(body, head_path, tail_path, p.tail)
     body.label = "W rest body"
 
     # Each leg faces inward along its outer stroke.
@@ -267,6 +283,22 @@ def w_rest_geometry(
         right_mount=leg_mount(right, facing=centerline % 0),
         violin_mount=violin_mount,
     )
+
+
+def _engrave_tail(body: Part, head_path: Wire, tail_path: Wire, tail: WTailParameters) -> Part:
+    """Cut the tail engraving into the flat underside, at its start in the tail frame."""
+    underside = _faces_on(body, Plane.XY.offset(-tail.thickness))
+    if len(underside) != 1:
+        raise ValueError("Tail engraving needs a single flat tail underside")
+    direction = tail_path % 0
+    x, y = tail.engraving_start
+    start = head_path @ 1 + direction * (tail.taper_length + x) - _front(direction) * y
+    frame = Plane(origin=start - Vector(0, 0, tail.thickness), x_dir=direction, z_dir=(0, 0, -1))
+    assert tail.engraving is not None
+    try:
+        return engrave(body, tail.engraving, underside[0], Location(frame))
+    except ValueError as error:
+        raise ValueError(f"Tail engraving: {error}") from error
 
 
 def _stripe_head(body: Part, path: Wire, stripes: WStripeParameters, top_radius: float) -> Part:
@@ -547,6 +579,7 @@ if __name__ == "__main__":
     from ocp_vscode import show
 
     from shoulder_rest.parts.leg.hinge_leg import HingeLeg
+    from shoulder_rest.parts.engraving.text_engraving import text_engraving
     from shoulder_rest.parts.leg.rod_retention import RodRetentionParameters
     from shoulder_rest.parts.rest import Rest
     from shoulder_rest.parts.shoulder.step_shoulder import load_shoulder_cast
@@ -559,7 +592,7 @@ if __name__ == "__main__":
         left_cap=WHeadCapParameters(angle=24, height=34, depth=30),
         right_cap=WHeadCapParameters(angle=10, height=30, depth=20),
         stripes=WStripeParameters(),
-    )))
+    ), tail=WTailParameters(engraving=text_engraving("v1.0"))))
     # show(geometry.part)  # Inspect the body in its local frame.
     rest = Rest(geometry, HingeLeg(rod_retention=RodRetentionParameters()))
     rest.add(rest.left.leg(angle=20))

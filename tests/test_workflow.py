@@ -4,11 +4,13 @@ import unittest
 
 from build123d import Compound, Location, Rotation
 
+from shoulder_rest.parts.engraving.text_engraving import text_engraving
 from shoulder_rest.parts.leg.hinge_leg import HingeLeg
 from shoulder_rest.parts.rest import Rest
 from shoulder_rest.parts.rest.bar_rest import bar_rest_geometry
 from shoulder_rest.parts.rest.w_rest import (
-    WHeadCapParameters, WHeadParameters, WRestParameters, WStripeParameters, w_rest_geometry,
+    WHeadCapParameters, WHeadParameters, WRestParameters, WStripeParameters, WTailParameters,
+    w_rest_geometry,
 )
 from shoulder_rest.parts.shoulder.step_shoulder import load_shoulder_cast
 from shoulder_rest.parts.violin_outline.spline_violin_outline import build_violin_outline
@@ -24,7 +26,7 @@ class WorkflowTests(unittest.TestCase):
             left_cap=WHeadCapParameters(angle=24, height=34, depth=30),
             right_cap=WHeadCapParameters(angle=10, height=30, depth=20),
             stripes=WStripeParameters(),
-        )))
+        ), tail=WTailParameters(engraving=text_engraving("v1.0"))))
         rest = Rest(geometry, HingeLeg())
         rest.position_on(violin)
         self.assertEqual(rest.violin_joint.location, violin.mount_joint.location)
