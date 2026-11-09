@@ -53,7 +53,7 @@ def _retention_bumps(
         raise ValueError("Bumps must fit between the diamond seat and the entry bend")
     if sqrt(r.bump_y**2 + bump_z**2) <= p.rod.diameter / 2 + r.bump_radius:
         raise ValueError("Retention bumps must clear the seated rod")
-    if bump_z + r.bump_radius >= p.rod_house_half:
+    if bump_z + r.bump_radius >= p.knuckle_half:
         raise ValueError("Retention bumps must fit below the mounting face")
     with BuildPart(mode=Mode.PRIVATE) as bumps:
         with Locations((-bump_x, r.bump_y, bump_z), (bump_x, r.bump_y, bump_z)):
