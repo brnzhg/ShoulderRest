@@ -23,7 +23,7 @@ This is a Python CAD project using build123d, managed by uv. Read [README.md](RE
 
 ## Validation
 
-Run `uv run python -m unittest discover -s tests`, `uv run mypy src tests examples` and `uv run ruff check .` for model changes. Keep a small set of smoke checks for interface construction and placement. Inspect evolving geometry in CAD previews; do not add geometry-preservation or reference-solid regression tests unless requested. Documentation-only changes need accurate API examples and links, not a CAD test run.
+Run `uv run python -m unittest discover -s tests`, `uv run mypy src tests examples scripts` and `uv run ruff check .` for model changes. Keep a small set of smoke checks for interface construction and placement. Inspect evolving geometry in CAD previews. Without a viewer, `uv run python scripts/render.py <module or script>` renders a preview's `show` call to a PNG of standard views in `exports/renders/`; see its `--help` for hiding, ghosting and part-aligned views. Do not add geometry-preservation or reference-solid regression tests unless requested. Documentation-only changes need accurate API examples and links, not a CAD test run.
 
 ## Documentation
 

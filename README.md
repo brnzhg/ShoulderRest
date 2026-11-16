@@ -81,6 +81,7 @@ scene = Compound(children=[shoulder.assembly, violin.block, rest.assembly])
 - `src/shoulder_rest/assets/`: input geometry bundled with the package.
 - `assets/`: reference material, such as the original STEP solids.
 - `examples/`: standalone scripts, such as the rod-retention test coupon.
+- `scripts/`: development tools, such as `render.py`, which renders a preview to a PNG without a viewer.
 - `tests/`: smoke checks for construction and placement.
 - `changelog/`: notable changes.
 - `exports/`: generated STEP and STL files, ignored by Git.

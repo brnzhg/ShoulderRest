@@ -22,6 +22,7 @@ dev = [
     "mypy>=2.3.1",
     "ocp-vscode>=4.1.0",
     "ruff>=0.17.3",
+    "vtk>=9.7.2",
 ]
 
 [[tool.mypy.overrides]]
