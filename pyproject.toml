@@ -8,6 +8,9 @@ dependencies = [
     "build123d>=0.12.0",
 ]
 
+[project.optional-dependencies]
+render = ["vtk>=9.7.2"]
+
 [build-system]
 requires = ["uv_build>=0.12.11,<0.13.0"]
 build-backend = "uv_build"
@@ -15,7 +18,6 @@ build-backend = "uv_build"
 [tool.uv.build-backend]
 module-name = "shoulder_rest"
 module-root = "src"
-# uv_build includes all files inside the package, including assets/.
 
 [dependency-groups]
 dev = [
@@ -24,6 +26,9 @@ dev = [
     "ruff>=0.17.3",
     "vtk>=9.7.2",
 ]
+
+[tool.mypy]
+mypy_path = "examples"  # Tests and examples import example_shoulder.
 
 [[tool.mypy.overrides]]
 module = ["ocp_vscode"]

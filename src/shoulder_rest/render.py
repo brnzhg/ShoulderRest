@@ -1,15 +1,17 @@
 """Render shapes to a PNG sheet of standard views, for inspecting geometry without a viewer.
 
-    uv run python scripts/render.py shoulder_rest.parts.leg.hinge_leg
-    uv run python scripts/render.py examples/rod_retention_coupon.py --views iso,bottom
-    uv run python scripts/render.py shoulder_rest.parts.rest.w_rest --hide shoulder -o out.png
-    uv run python scripts/render.py shoulder_rest.parts.leg.hinge_leg --ghost housing,tool
-    uv run python scripts/render.py shoulder_rest.parts.rest.w_rest --frame "rest body" --hide shoulder,violin
+    uv run python -m shoulder_rest.render shoulder_rest.parts.leg.hinge_leg
+    uv run python -m shoulder_rest.render examples/rod_retention_coupon.py --views iso,bottom
+    uv run python -m shoulder_rest.render examples/w_rest_fitting.py --hide shoulder -o out.png
+    uv run python -m shoulder_rest.render shoulder_rest.parts.leg.hinge_leg --ghost housing,tool
+    uv run python -m shoulder_rest.render examples/w_rest_fitting.py --frame "rest body" --hide shoulder,violin
 
 The target is a module or script whose main section calls ``ocp_vscode.show``;
 it runs with ``show`` captured, and the last call's shapes are rendered with
-orthographic cameras. Shapes keep their own colors where set. ``render`` can
-also be called directly with shapes.
+orthographic cameras. A script runs with its own directory on ``sys.path``, as
+it would from the command line. Shapes keep their own colors where set.
+``render`` can also be called directly with shapes. Requires the ``render``
+extra (VTK).
 """
 
 import argparse
@@ -22,9 +24,13 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
-import vtkmodules.vtkRenderingFreeType  # Registers text rendering.
-import vtkmodules.vtkRenderingOpenGL2  # noqa: F401  Registers the render window backend.
 from build123d import Compound, GeomType, Shape, Vector
+
+try:
+    import vtkmodules.vtkRenderingFreeType  # Registers text rendering.
+    import vtkmodules.vtkRenderingOpenGL2  # noqa: F401  Registers the render window backend.
+except ImportError as error:  # pragma: no cover
+    raise ImportError("Rendering needs VTK; install shoulder-rest[render]") from error
 from vtkmodules.util.numpy_support import numpy_to_vtk, numpy_to_vtkIdTypeArray
 from vtkmodules.vtkCommonCore import vtkPoints
 from vtkmodules.vtkCommonDataModel import vtkCellArray, vtkPolyData
@@ -285,6 +291,7 @@ def _run_preview(target: str) -> list[Shape]:
     sys.modules["ocp_vscode"] = viewer
     sys.argv = [target]
     if target.endswith(".py"):
+        sys.path.insert(0, str(Path(target).resolve().parent))
         runpy.run_path(target, run_name="__main__")
     else:
         runpy.run_module(target, run_name="__main__", alter_sys=True)

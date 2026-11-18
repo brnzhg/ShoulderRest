@@ -10,7 +10,9 @@ Use Python 3.12 and [uv](https://docs.astral.sh/uv/):
 uv sync --locked
 ```
 
-Select the project's `.venv` interpreter in VS Code and start the OCP CAD Viewer extension. Each implementation module previews itself when run, for example `uv run python -m shoulder_rest.parts.rest.w_rest`. Run the smoke checks with `uv run python -m unittest discover -s tests`.
+Select the project's `.venv` interpreter in VS Code and start the OCP CAD Viewer extension. Part modules preview themselves when run, for example `uv run python -m shoulder_rest.parts.leg.hinge_leg`, and `examples/` holds fitted previews on an example shoulder scan, such as `uv run python examples/w_rest_fitting.py`. Run the smoke checks with `uv run python -m unittest discover -s tests`.
+
+To use the library from another project, depend on it with the `render` extra if you want PNG previews: `shoulder-rest[render]`.
 
 ## How the pieces fit together
 
@@ -38,17 +40,19 @@ A rest is fitted to one player. The shoulder fixes where the violin sits, the vi
 ## Building a rest
 
 ```python
-from build123d import Compound
+from build123d import Compound, Location
 
 from shoulder_rest.parts.leg.hinge_leg import HingeLeg
 from shoulder_rest.parts.rest import Rest
 from shoulder_rest.parts.rest.w_rest import (
     WHeadCapParameters, WHeadParameters, WRestParameters, WStripeParameters, w_rest_geometry,
 )
-from shoulder_rest.parts.shoulder.step_shoulder import load_shoulder_cast
+from shoulder_rest.parts.shoulder.step_shoulder import load_shoulder
 from shoulder_rest.parts.violin_outline.spline_violin_outline import build_violin_outline
 
-shoulder = load_shoulder_cast()
+# Your scan's casts, and where the violin's mount frame sits on them.
+violin_location = Location((-40, -70, 80), (8, -24, 66))
+shoulder = load_shoulder("reference.step", "extended.step", violin_location)
 violin = build_violin_outline()
 violin.position_on(shoulder)
 
@@ -73,15 +77,14 @@ scene = Compound(children=[shoulder.assembly, violin.block, rest.assembly])
 - **A new rest shape** is a function that returns a `RestGeometry`. Subtract `shoulder.cutter(violin_mount)` to fit the shoulder.
 - **A new leg mechanism** implements the `Leg` and `LegInstallation` protocols.
 - **A new engraving** is an `Engraving` of any flat sketch and a depth; `text_engraving` builds one from text. A rest design cuts it with `engrave(body, engraving, face, at=frame)`.
-- **A different violin or shoulder** is a `ViolinOutline` built from any right-hand outline curve, or a `Shoulder` built from cast shapes and a violin location.
+- **A different violin or shoulder** is a `ViolinOutline` built from any right-hand outline curve, or a `Shoulder` built from cast shapes and a violin location. `load_shoulder` reads casts from STEP files, with an optional `cast_location` to level the scan.
 
 ## Repository layout
 
 - `src/shoulder_rest/parts/`: one subpackage per interface (`shoulder/`, `violin_outline/`, `leg/`, `rest/`, `engraving/`). Each package's `__init__` exposes its interface; implementation modules sit beside it.
-- `src/shoulder_rest/assets/`: input geometry bundled with the package.
-- `assets/`: reference material, such as the original STEP solids.
-- `examples/`: standalone scripts, such as the rod-retention test coupon.
-- `scripts/`: development tools, such as `render.py`, which renders a preview to a PNG without a viewer.
+- `src/shoulder_rest/render.py`: renders a preview to a PNG without a viewer (`uv run python -m shoulder_rest.render --help`).
+- `assets/`: reference material, such as the original Onshape leg solids.
+- `examples/`: an example shoulder scan (`data/`, loaded by `example_shoulder.py`) and standalone scripts, such as fitted rest previews and the rod-retention test coupon.
 - `tests/`: smoke checks for construction and placement.
 - `changelog/`: notable changes.
 - `exports/`: generated STEP and STL files, ignored by Git.

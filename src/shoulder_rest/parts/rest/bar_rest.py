@@ -1,7 +1,4 @@
-"""Rounded bars between two leg centers, flat or with one half fitted to the shoulder.
-
-Run to preview the contoured bar on the bundled shoulder.
-"""
+"""Rounded bars between two leg centers, flat or with one half fitted to the shoulder."""
 
 from dataclasses import dataclass
 from math import isfinite
@@ -116,23 +113,3 @@ def _geometry(
         violin_mount=violin.mount_location * Pos(0, 0, p.violin_gap),
     )
 
-
-if __name__ == "__main__":
-    from build123d import Compound
-    from ocp_vscode import show
-
-    from shoulder_rest.parts.leg.hinge_leg import HingeLeg
-    from shoulder_rest.parts.rest import Rest
-    from shoulder_rest.parts.shoulder.step_shoulder import load_shoulder_cast
-    from shoulder_rest.parts.violin_outline.spline_violin_outline import build_violin_outline
-
-    shoulder = load_shoulder_cast()
-    violin = build_violin_outline()
-    violin.position_on(shoulder)
-    rest = Rest(contoured_bar_rest_geometry(violin, shoulder), HingeLeg())
-    rest.add(rest.left.leg(angle=20))
-    rest.add(rest.right.leg())
-    rest.add(rest.left.housing)
-    rest.add(rest.right.housing)
-    rest.position_on(violin)
-    show(Compound(label="Bar rest fitting", children=[shoulder.assembly, violin.block, rest.assembly]))

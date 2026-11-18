@@ -1,6 +1,8 @@
 """Interface smoke checks; inspect evolving geometry in CAD previews."""
 
+import sys
 import unittest
+from pathlib import Path
 
 from build123d import Compound, Location, Rotation
 
@@ -12,14 +14,16 @@ from shoulder_rest.parts.rest.w_rest import (
     WHeadCapParameters, WHeadParameters, WRestParameters, WStripeParameters, WTailParameters,
     w_rest_geometry,
 )
-from shoulder_rest.parts.shoulder.step_shoulder import load_shoulder_cast
 from shoulder_rest.parts.violin_outline.spline_violin_outline import build_violin_outline
+
+sys.path.insert(0, str(Path(__file__).parents[1] / "examples"))
+from example_shoulder import load_example_shoulder
 
 
 class WorkflowTests(unittest.TestCase):
     def test_w_rest_constructs_and_positions_on_violin(self) -> None:
         """Catch construction failures and local/world frame mixups in the W workflow."""
-        shoulder = load_shoulder_cast()
+        shoulder = load_example_shoulder()
         violin = build_violin_outline()
         violin.position_on(shoulder)
         geometry = w_rest_geometry(violin, shoulder, WRestParameters(head=WHeadParameters(

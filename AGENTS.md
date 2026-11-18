@@ -17,13 +17,15 @@ This is a Python CAD project using build123d, managed by uv. Read [README.md](RE
 
 ## Files and dependencies
 
-- Keep reusable code in `src/shoulder_rest/parts/` and runtime input geometry in `src/shoulder_rest/assets/`. Load bundled assets through `importlib.resources` rather than hardcoded filesystem paths.
+- Keep reusable code in `src/shoulder_rest/parts/`. The library ships no player-specific data or fitted constants: shoulder scans, violin placements and tuned rest parameters belong to the project that uses the library, and enter through parameters and loaders.
+- Example data and scripts live in `examples/`. `examples/example_shoulder.py` loads an example scan for previews and tests; scripts there import it directly.
 - Keep non-runtime references in `assets/` and generated exports in the ignored `exports/` directory.
+- `shoulder_rest.render` is a development tool shared with downstream projects; it needs the `render` extra (VTK).
 - Use `uv sync --locked` for the environment. Add runtime dependencies with `uv add` and development tools with `uv add --dev`; keep `pyproject.toml` and `uv.lock` consistent.
 
 ## Validation
 
-Run `uv run python -m unittest discover -s tests`, `uv run mypy src tests examples scripts` and `uv run ruff check .` for model changes. Keep a small set of smoke checks for interface construction and placement. Inspect evolving geometry in CAD previews. Without a viewer, `uv run python scripts/render.py <module or script>` renders a preview's `show` call to a PNG of standard views in `exports/renders/`; see its `--help` for hiding, ghosting and part-aligned views. Do not add geometry-preservation or reference-solid regression tests unless requested. Documentation-only changes need accurate API examples and links, not a CAD test run.
+Run `uv run python -m unittest discover -s tests`, `uv run mypy src tests examples` and `uv run ruff check .` for model changes. Keep a small set of smoke checks for interface construction and placement. Inspect evolving geometry in CAD previews. Without a viewer, `uv run python -m shoulder_rest.render <module or script>` renders a preview's `show` call to a PNG of standard views in `exports/renders/`; see its `--help` for hiding, ghosting and part-aligned views. Do not add geometry-preservation or reference-solid regression tests unless requested. Documentation-only changes need accurate API examples and links, not a CAD test run.
 
 ## Documentation
 
