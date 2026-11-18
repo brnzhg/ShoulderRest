@@ -57,8 +57,8 @@ violin = build_violin_outline()
 violin.position_on(shoulder)
 
 geometry = w_rest_geometry(violin, shoulder, WRestParameters(head=WHeadParameters(
-    left_cap=WHeadCapParameters(angle=24, height=34, depth=30),
-    right_cap=WHeadCapParameters(angle=10, height=30, depth=20),
+    left_cap=WHeadCapParameters(angle=24, height=34),
+    right_cap=WHeadCapParameters(angle=10, height=30),
     stripes=WStripeParameters(),
 )))
 rest = Rest(geometry, HingeLeg())
@@ -74,7 +74,7 @@ scene = Compound(children=[shoulder.assembly, violin.block, rest.assembly])
 
 ## Extending
 
-- **A new rest shape** is a function that returns a `RestGeometry`. Subtract `shoulder.cutter(violin_mount)` to fit the shoulder.
+- **A new rest shape** is a function that returns a `RestGeometry`. Fit it to the shoulder by subtracting `shoulder.cutter(violin_mount)`, or, for an underside that can be shaped before it is built (levelled, blended), with the height-field helpers in `parts.rest.height_field`, as the W rest does.
 - **A new leg mechanism** implements the `Leg` and `LegInstallation` protocols.
 - **A new engraving** is an `Engraving` of any flat sketch and a depth; `text_engraving` builds one from text. A rest design cuts it with `engrave(body, engraving, face, at=frame)`.
 - **A different violin or shoulder** is a `ViolinOutline` built from any right-hand outline curve, or a `Shoulder` built from cast shapes and a violin location. `load_shoulder` reads casts from STEP files, with an optional `cast_location` to level the scan.

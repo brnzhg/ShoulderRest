@@ -27,8 +27,8 @@ class WorkflowTests(unittest.TestCase):
         violin = build_violin_outline()
         violin.position_on(shoulder)
         geometry = w_rest_geometry(violin, shoulder, WRestParameters(head=WHeadParameters(
-            left_cap=WHeadCapParameters(angle=24, height=34, depth=30),
-            right_cap=WHeadCapParameters(angle=10, height=30, depth=20),
+            left_cap=WHeadCapParameters(angle=24, height=34),
+            right_cap=WHeadCapParameters(angle=10, height=30),
             stripes=WStripeParameters(),
         ), tail=WTailParameters(engraving=text_engraving("v1.0"))))
         rest = Rest(geometry, HingeLeg())

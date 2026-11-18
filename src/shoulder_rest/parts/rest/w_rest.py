@@ -10,11 +10,13 @@ from dataclasses import dataclass
 from math import cos, isfinite, radians, sin, tan
 
 from build123d import (
-    Align, Axis, Bezier, Box, BuildLine, BuildSketch, Compound, Edge, Face,
-    FilletPolyline, GeomType, Line, Location, Mode, Part, Plane, Polyline, Pos,
-    Select, Shape, Side, Sketch, Vector, Wire, extrude, fillet, make_face,
+    Axis, Bezier, BuildLine, BuildSketch, Compound, Edge, Face,
+    FilletPolyline, GeomType, Location, Mode, Part, Plane, Polyline, Pos,
+    Shape, Side, Sketch, Vector, Wire, extrude, fillet, make_face,
 )
+import numpy as np
 from build123d.topology import ShapeHistory
+from numpy.typing import NDArray
 from OCP.BRepFilletAPI import BRepFilletAPI_MakeFillet  # type: ignore[import-untyped]
 from OCP.Standard import Standard_Failure  # type: ignore[import-untyped]
 from OCP.StdFail import StdFail_NotDone  # type: ignore[import-untyped]
@@ -22,6 +24,9 @@ from OCP.StdFail import StdFail_NotDone  # type: ignore[import-untyped]
 from shoulder_rest.parts._validation import single_solid
 from shoulder_rest.parts.engraving import Engraving, engrave
 from shoulder_rest.parts.rest import RestGeometry, leg_mount
+from shoulder_rest.parts.rest.height_field import (
+    HeightField, above, limit_slope, path_coordinates, sample_top, smooth_max, surface,
+)
 from shoulder_rest.parts.shoulder import Shoulder
 from shoulder_rest.parts.violin_outline import ViolinOutline
 
@@ -72,26 +77,40 @@ class WPathParameters:
 
 @dataclass(frozen=True)
 class WHeadCapParameters:
-    """Angled trim of one head end, in mm and degrees, applied after the shoulder cut.
+    """A floor that levels off one head end, in mm and degrees.
 
-    The cap line crosses the end's centerline ``height`` below Z=0; a positive
-    ``angle`` lowers its front relative to its back. The trim reaches ``depth``
-    inward along the head and ``blend_radius`` rounds it into the shoulder
-    contour (zero leaves it sharp).
+    Where the shoulder falls away toward a head end, its contour alone would
+    hang the end down to the head's full ``depth``. The cap is a plane the
+    underside never drops below: it crosses the end's centerline ``height``
+    below Z=0, a positive ``angle`` lowers its front relative to its back, and
+    a positive ``slope`` lowers it toward the head's middle. ``blend`` rounds
+    the underside where the contour runs onto the cap (zero leaves a crease).
+    Where the contour stays above the cap, the cap changes nothing.
+
+    Each cap holds at its own end and hands over to the other end's floor
+    across the middle of the head (``CAP_HANDOVER``), so the two caps never
+    compete.
     """
 
     angle: float = 10
     height: float = 12
-    depth: float = 20
-    blend_radius: float = 10
+    slope: float = 0
+    blend: float = 6
 
     def __post_init__(self) -> None:
         if not isfinite(self.angle) or not -90 < self.angle < 90:
             raise ValueError("Cap angle must be finite and between -90 and 90 degrees")
-        if not all(isfinite(v) and v > 0 for v in (self.height, self.depth)):
-            raise ValueError("Cap height and depth must be finite and positive")
-        if not isfinite(self.blend_radius) or self.blend_radius < 0:
-            raise ValueError("Cap blend radius must be finite and nonnegative")
+        if not isfinite(self.height) or self.height <= 0:
+            raise ValueError("Cap height must be finite and positive")
+        if not isfinite(self.slope) or not -90 < self.slope < 90:
+            raise ValueError("Cap slope must be finite and between -90 and 90 degrees")
+        if not isfinite(self.blend) or self.blend < 0:
+            raise ValueError("Cap blend must be finite and nonnegative")
+
+
+CAP_HANDOVER = (0.25, 0.75)
+"""Fractions along the head path, from the right tip, over which the right
+cap's floor hands over to the left cap's."""
 
 
 @dataclass(frozen=True)
@@ -139,12 +158,14 @@ class WStripeParameters:
 
 @dataclass(frozen=True)
 class WHeadParameters:
-    """The head band around the head strokes, cut to the shoulder.
+    """The head band around the head strokes, its underside fitted to the shoulder.
 
-    Widths are measured from the centerline. ``depth`` is the oversized depth
-    below Z=0 before the shoulder cut. ``corner_radius`` rounds the upright end
-    corners and ``bottom_radius`` the outline of the shoulder and cap surfaces.
-    ``stripes`` cuts rubber-band grooves after the bottom fillets; ``None`` omits them.
+    Widths are measured from the centerline. The underside follows the
+    shoulder's upper surface, sampled every ``sample_spacing`` mm (see
+    ``height_field``), never drops below either end's cap, and never deeper
+    than ``depth`` below Z=0. ``corner_radius`` rounds the band's end corners
+    in plan and ``bottom_radius`` the underside's outline. ``stripes`` cuts
+    rubber-band grooves after the bottom fillet; ``None`` omits them.
     """
 
     front_width: float = 18
@@ -155,10 +176,12 @@ class WHeadParameters:
     left_cap: WHeadCapParameters | None = None
     right_cap: WHeadCapParameters | None = None
     stripes: WStripeParameters | None = None
+    sample_spacing: float = 1.5
 
     def __post_init__(self) -> None:
-        if not all(isfinite(v) and v > 0 for v in (self.front_width, self.back_width, self.depth)):
-            raise ValueError("Head widths and depth must be finite and positive")
+        sizes = (self.front_width, self.back_width, self.depth, self.sample_spacing)
+        if not all(isfinite(v) and v > 0 for v in sizes):
+            raise ValueError("Head widths, depth and sample spacing must be finite and positive")
         if not all(isfinite(v) and v >= 0 for v in (self.corner_radius, self.bottom_radius)):
             raise ValueError("Head radii must be finite and nonnegative")
         for cap in (self.left_cap, self.right_cap):
@@ -229,12 +252,12 @@ class WRestParameters:
 def w_rest_geometry(
     violin: ViolinOutline, shoulder: Shoulder, p: WRestParameters = WRestParameters(),
 ) -> RestGeometry:
-    """Fit and cap the head, join the tail, and round the body and optional stripes.
+    """Fit the head's underside to the shoulder and caps, join the tail, and round the body.
 
-    Whether the fillets succeed depends on the fit; radii are never reduced
-    automatically. For example, the uncapped default fit cannot take the head
-    bottom fillet. Material outside the shoulder cutter keeps the full
-    oversized head depth, so inspect the fit where the head passes the cast.
+    The underside is one fitted surface, so the head needs a single bottom
+    fillet; the tail is rounded on its own before joining. Whether the
+    remaining fillets and stripes succeed still depends on the fit; radii are
+    never reduced automatically.
     """
     left = violin.attachment_point("left", p.left_fraction)
     right = violin.attachment_point("right", p.right_fraction)
@@ -243,29 +266,17 @@ def w_rest_geometry(
     *head_edges, tail_edge = centerline.order_edges()
     head_path, tail_path = Wire(head_edges), Wire([tail_edge])
 
-    blank = extrude(_head_footprint(head_path, p.head), amount=-p.head.depth)
-    head = single_solid(
-        blank - shoulder.cutter(violin_mount), "Shoulder cut must leave one valid W head solid",
-    )
-    for end, cap in (("left", p.head.left_cap), ("right", p.head.right_cap)):
-        if cap is not None:
-            try:
-                head = _cap(head, head_path, end, cap)
-            except ValueError as error:
-                raise ValueError(f"{end.capitalize()} head cap: {error}") from error
+    footprint = _head_footprint(head_path, p.head)
+    underside = _head_underside(footprint, shoulder.cutter(violin_mount), head_path, p.head)
+    blank = extrude(footprint, amount=-(p.head.depth + 1))
+    head = single_solid(blank & above(underside, 1), "Underside must leave one valid W head solid")
+    head = _fillet_outline(head, _head_bottom(head), p.head.bottom_radius, "Head bottom fillet")
 
-    # Joining the tail and rounding the head corners leave remnants of the head's
-    # end walls below Z=0, so follow the bottom through them by history.
-    bottom = _head_bottom(head)
     tail = extrude(_tail_footprint(head_path, tail_path, p), amount=-p.tail.thickness)
-    body = head + tail
-    bottom = _descendants(bottom, body)
-    single_solid(body, "Joining the tail must leave one valid W rest solid")
+    tail_bottom = _faces_on(tail, Plane.XY.offset(-p.tail.thickness))
+    tail = _fillet_outline(tail, tail_bottom, p.tail.bottom_radius, "Tail bottom fillet")
+    body = single_solid(head + tail, "Joining the tail must leave one valid W rest solid")
 
-    body, bottom = _round_head_corners(body, bottom, head_path, p)
-    body = _fillet_outline(body, bottom, p.head.bottom_radius, "Head bottom fillet")
-    tail_bottom = _faces_on(body, Plane.XY.offset(-p.tail.thickness))
-    body = _fillet_outline(body, tail_bottom, p.tail.bottom_radius, "Tail bottom fillet")
     if p.head.stripes is not None:
         body = _stripe_head(body, head_path, p.head.stripes, p.top_radius)
     else:
@@ -404,15 +415,88 @@ def _centerline(right: Vector, left: Vector, path: WPathParameters) -> Wire:
 
 
 def _head_footprint(head_path: Wire, head: WHeadParameters) -> Sketch:
-    """Band from front_width left of the head path to back_width right of it."""
+    """Band from front_width left of the head path to back_width right of it, end corners rounded."""
     with BuildSketch(mode=Mode.PRIVATE) as footprint:
         make_face(head_path.offset_2d(head.front_width, side=Side.LEFT))
         make_face(head_path.offset_2d(head.back_width, side=Side.RIGHT))
+        if head.corner_radius:
+            corners = [point for t in (0, 1) for point in _end_corners(head_path, t, head)]
+            fillet([
+                vertex for vertex in footprint.vertices()
+                if any((Vector(vertex) - point).length < 1e-6 for point in corners)
+            ], head.corner_radius)
     return footprint.sketch
 
 
+def _end_corners(head_path: Wire, t: float, head: WHeadParameters) -> list[Vector]:
+    end, front = head_path @ t, _front(head_path % t)
+    return [end + front * head.front_width, end - front * head.back_width]
+
+
+MIN_THICKNESS = 1.0
+"""How close to the mounting face the underside may come, in mm."""
+
+
+def _head_underside(
+    footprint: Sketch, cutter: Shape, head_path: Wire, head: WHeadParameters,
+) -> Face:
+    """The shoulder's upper surface under the head, floored by the caps and the head depth."""
+    box = footprint.bounding_box()
+    margin = 3 * head.sample_spacing + head.bottom_radius
+    field = HeightField.grid(
+        (box.min.X - margin, box.min.Y - margin, box.max.X + margin, box.max.Y + margin),
+        head.sample_spacing,
+    )
+    field = limit_slope(sample_top(cutter, field))
+    fractions = [i / 200 for i in range(201)]
+    fraction, offset = path_coordinates(
+        field,
+        [((head_path @ t).X, (head_path @ t).Y) for t in fractions],
+        [(_front(head_path % t).X, _front(head_path % t).Y) for t in fractions],
+    )
+
+    # Hand the floor over from the right cap (fraction 0) to the left cap (1).
+    start, stop = CAP_HANDOVER
+    w = np.clip((fraction - start) / (stop - start), 0, 1)
+    w = w * w * (3 - 2 * w)
+    right = _cap_floor(field, head_path, "right", head.right_cap, head.depth)
+    left = _cap_floor(field, head_path, "left", head.left_cap, head.depth)
+    blends = [cap.blend if cap else 0.0 for cap in (head.right_cap, head.left_cap)]
+    z = smooth_max(field.z, (1 - w) * right + w * left, (1 - w) * blends[0] + w * blends[1])
+    z = smooth_max(z, np.full_like(z, -head.depth), 1.0)
+
+    inside = (
+        (fraction > 0) & (fraction < 1)
+        & (offset <= head.front_width) & (offset >= -head.back_width)
+    )
+    if (z[inside] > -MIN_THICKNESS).any():
+        raise ValueError(
+            "The head's underside reaches the mounting face; lower the caps or raise violin_gap"
+        )
+    return surface(field.with_z(z))
+
+
+def _cap_floor(
+    field: HeightField, head_path: Wire, end: str, cap: WHeadCapParameters | None, depth: float,
+) -> NDArray[np.float64]:
+    """Heights of one end's cap plane; far below the head depth when there is no cap."""
+    x, y = field.points()
+    if cap is None:
+        return np.full_like(x, -2 * depth)
+    t = 1 if end == "left" else 0
+    tip, tangent = head_path @ t, head_path % t
+    inward = -tangent if end == "left" else tangent
+    front = _front(tangent)
+    along = (x - tip.X) * inward.X + (y - tip.Y) * inward.Y
+    across = (x - tip.X) * front.X + (y - tip.Y) * front.Y
+    return -cap.height - tan(radians(cap.slope)) * along - tan(radians(cap.angle)) * across
+
+
 def _tail_footprint(head_path: Wire, tail_path: Wire, p: WRestParameters) -> Sketch:
-    """Tail band tapering from the head's end corners, with rounded free-end corners."""
+    """Tail band tapering from the head's end corners, with rounded free-end corners.
+
+    It starts slightly inside the head, at the head's full width.
+    """
     tail = p.tail
     if tail.taper_length >= tail_path.length:
         raise ValueError("Tail taper length must be shorter than the tail stroke")
@@ -425,6 +509,9 @@ def _tail_footprint(head_path: Wire, tail_path: Wire, p: WRestParameters) -> Ske
 
     front_start = junction + head_front * p.head.front_width
     back_start = junction - head_front * p.head.back_width
+    # Reach back into the head past its rounded end corners, so the tail fills
+    # them down to its underside and the join needs no fillet.
+    overlap = head_direction * (p.head.corner_radius + 1)
     front_end = taper_end + tail_front * half_width
     back_end = taper_end - tail_front * half_width
     with BuildSketch(mode=Mode.PRIVATE) as footprint:
@@ -432,7 +519,7 @@ def _tail_footprint(head_path: Wire, tail_path: Wire, p: WRestParameters) -> Ske
             for start, end in ((front_start, front_end), (back_start, back_end)):
                 Bezier(start, start + head_direction * handle, end - tail_direction * handle, end)
             Polyline(front_end, tip + tail_front * half_width, tip - tail_front * half_width, back_end)
-            Line(back_start, front_start)
+            Polyline(back_start, back_start - overlap, front_start - overlap, front_start)
         make_face()
         if tail.corner_radius:
             free_end = footprint.vertices().sort_by(Axis(tip, tail_direction))[-2:]
@@ -446,83 +533,6 @@ def _head_bottom(head: Part) -> list[Face]:
     Every head side wall reaches the Z=0 mounting face; the bottom lies entirely below it.
     """
     return [face for face in head.faces() if face.bounding_box().max.Z < -1e-6]
-
-
-def _cap(head: Part, head_path: Wire, end: str, cap: WHeadCapParameters) -> Part:
-    """Trim the "left" or "right" head end below an angled plane, then blend it into the contour."""
-    t = 1 if end == "left" else 0
-    tip, tangent = head_path @ t, head_path % t
-    inward = -tangent if end == "left" else tangent
-    front = _front(tangent)
-    angle = radians(cap.angle)
-    # The cap plane holds the inward direction and falls toward the front by
-    # the cap angle. Its normal points down into the material to remove.
-    cap_plane = Plane(
-        origin=tip - Vector(0, 0, cap.height),
-        x_dir=inward, z_dir=-(front * sin(angle) + Vector(0, 0, cos(angle))),
-    )
-    stop_plane = Plane(origin=tip + inward * cap.depth, z_dir=inward)
-
-    # A box under the cap plane, with its inner face on the stop plane, covers the end.
-    reach = 2 * head.bounding_box().diagonal
-    inner_edge = Location(cap_plane.shift_origin(cap_plane.origin + inward * cap.depth))
-    cutter = inner_edge * Box(reach, reach, reach, align=(Align.MAX, Align.CENTER, Align.MIN))
-    removed = head & cutter
-    if not removed or removed.volume < 1e-6:
-        raise ValueError("Cap misses the head; reduce height or adjust depth")
-    if removed.bounding_box().max.Z >= -1e-6:
-        raise ValueError("Cap cut reaches the mounting face; increase height or reduce angle/depth")
-    capped = single_solid(head - cutter, "Cap cut must leave one valid head solid")
-    if cap.blend_radius == 0:
-        return capped
-
-    # Round the cap-to-step join first, then the seam where the trim (cap,
-    # step and their blend) meets the rest of the bottom: the shoulder contour.
-    step_blend: list[Face] = []
-    step = _edges_between(_faces_on(capped, cap_plane), _faces_on(capped, stop_plane))
-    if step:
-        capped = _fillet(capped, step, cap.blend_radius, "Cap step blend")
-        step_blend = list(capped.faces(Select.LAST))
-    trim = _faces_on(capped, cap_plane) + _faces_on(capped, stop_plane) + step_blend
-    trimmed = set(trim)
-    contour = [face for face in _head_bottom(capped) if face not in trimmed]
-    seam = _edges_between(trim, contour)
-    if not seam:
-        raise ValueError("Cap has no shoulder-surface join to blend; adjust height/depth")
-    return single_solid(
-        _fillet(capped, seam, cap.blend_radius, "Cap blend"), "Cap blend must leave one valid head solid",
-    )
-
-
-def _round_head_corners(
-    body: Part, bottom: list[Face], head_path: Wire, p: WRestParameters,
-) -> tuple[Part, list[Face]]:
-    """Round the exposed upright corners at both head ends.
-
-    The tail covers the left end's corners down to its underside, where the
-    head and tail sides meet tangentially; only the edges below it are rounded.
-    """
-    if not p.head.corner_radius:
-        return body, bottom
-
-    def corners(t: float) -> list[Vector]:
-        end, front = head_path @ t, _front(head_path % t)
-        return [end + front * p.head.front_width, end - front * p.head.back_width]
-
-    def at(edge: Edge, points: list[Vector]) -> bool:
-        center = edge.center()
-        return any((Vector(center.X, center.Y) - point).length < 1e-6 for point in points)
-
-    below_tail = -p.tail.thickness + 1e-6
-    edges = [
-        edge for edge in body.edges().filter_by(Axis.Z)
-        if at(edge, corners(0))
-        or (at(edge, corners(1)) and edge.bounding_box().max.Z <= below_tail)
-    ]
-    if not edges:
-        return body, bottom
-    rounded = _fillet(body, edges, p.head.corner_radius, "Head corner fillet")
-    return rounded, _descendants(bottom, rounded)
 
 
 def _fillet_outline(body: Part, faces: list[Face], radius: float, name: str) -> Part:
