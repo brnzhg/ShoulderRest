@@ -64,6 +64,7 @@ TEXT = (0.2, 0.2, 0.2)
 def render(
     shapes: Iterable[Shape], path: Path | str, *, views: Sequence[str] = DEFAULT_VIEWS,
     size: int = 600, hide: Sequence[str] = (), ghost: Sequence[str] = (), frame: str | None = None,
+    focus: Sequence[str] = (),
 ) -> list[tuple[str, tuple[float, float, float]]]:
     """Write a PNG with one orthographic viewport per view; return each part's label and color.
 
@@ -72,6 +73,8 @@ def render(
     ``hide`` string are skipped, and those matching a ``ghost`` string are drawn
     translucent to show what is inside. ``frame`` names a leaf whose local frame
     the views use instead of the world frame, such as a positioned rest body.
+    Cameras fit the leaves matching a ``focus`` string, or all leaves; others
+    may then be cropped.
     """
     unknown = [view for view in views if view not in VIEWS]
     if unknown or not views:
@@ -86,7 +89,10 @@ def render(
     leaves = [leaf for leaf in leaves if not _matches(leaf, hide)]
     if not leaves:
         raise ValueError("Nothing to render")
-    bounds = Compound(leaves).bounding_box()
+    focused = [leaf for leaf in leaves if _matches(leaf, focus)] if focus else leaves
+    if not focused:
+        raise ValueError(f"No part label contains any of {list(focus)}")
+    bounds = Compound(focused).bounding_box()
     tolerance = max(bounds.diagonal * 5e-4, 1e-3)
 
     colors: dict[str, tuple[float, float, float]] = {}
@@ -127,6 +133,14 @@ def render(
         if index == 0:
             for line, (name, color) in enumerate(legend):
                 _label(renderer, name, 8, tile_height - 24 - 20 * line, [0.6 * c for c in color])
+        window.AddRenderer(renderer)
+    for index in range(len(views), rows * columns):  # Blank the unused tiles.
+        column, row = index % columns, index // columns
+        renderer = vtkRenderer()
+        renderer.SetViewport(
+            column / columns, 1 - (row + 1) / rows, (column + 1) / columns, 1 - row / rows,
+        )
+        renderer.SetBackground(*BACKGROUND)
         window.AddRenderer(renderer)
     window.Render()
 
@@ -309,6 +323,7 @@ def main() -> None:
     parser.add_argument("--hide", default="", help="comma-separated label substrings to skip")
     parser.add_argument("--ghost", default="", help="comma-separated label substrings to draw translucent")
     parser.add_argument("--frame", help="label substring of the part whose local frame the views use")
+    parser.add_argument("--focus", default="", help="comma-separated label substrings the views fit")
     args = parser.parse_args()
 
     name = Path(args.target).stem if args.target.endswith(".py") else args.target.rsplit(".", 1)[-1]
@@ -318,6 +333,7 @@ def main() -> None:
         shapes, output, views=args.views.split(","), size=args.size,
         hide=[word for word in args.hide.split(",") if word],
         ghost=[word for word in args.ghost.split(",") if word], frame=args.frame,
+        focus=[word for word in args.focus.split(",") if word],
     )
     for name, color in legend:
         print(f"{name}: rgb{tuple(round(c, 2) for c in color)}")

@@ -10,3 +10,5 @@ The library no longer bundles a shoulder scan or a fitted violin placement, so i
 | `w_rest`, `bar_rest`, `step_shoulder` main-section previews | `examples/w_rest_fitting.py`, `examples/bar_rest_fitting.py`, `examples/example_shoulder.py` |
 | `examples/onshape_w_rest.py` | Moved to ShoulderRestWorkbench as its first rest version |
 | `scripts/render.py` | `shoulder_rest.render` (`python -m shoulder_rest.render`), with VTK in the `render` extra |
+
+`render` also gained `focus` (`--focus`), to fit the cameras to some parts of a larger scene, and blanks unused tiles. The package now ships `py.typed` for type-checked downstream projects.
